@@ -4,6 +4,7 @@ import { start } from './commands/start'
 import { flush } from './commands/flush'
 import { stop } from './commands/stop'
 import { mkdirSync } from 'node:fs'
+import { ls } from './commands/ls'
 import { getPomituDirectory, getPomituLogsDirectory, getPomituPidsDirectory } from './helpers'
 
 function init() {
@@ -22,4 +23,5 @@ program
     .addCommand(start)
     .addCommand(flush)
     .addCommand(stop)
+    .addCommand(ls)
     .parse()
