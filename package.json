@@ -1,7 +1,7 @@
 {
-    "name": "typescript-project",
+    "name": "pomitu",
     "version": "1.0.0",
-    "description": "TypeScript Project",
+    "description": "Pomitu is a process manager inspired by PM2",
     "type": "module",
     "scripts": {
         "dev": "tsx src/app.ts",
@@ -14,6 +14,7 @@
         "@eslint/js": "^9.12.0",
         "@stylistic/eslint-plugin-js": "^2.9.0",
         "@types/node": "^22.7.4",
+        "@types/shell-quote": "^1.7.5",
         "eslint": "^9.12.0",
         "globals": "^15.10.0",
         "tsx": "^4.19.1",
@@ -22,5 +23,11 @@
     },
     "main": "dist/app.js",
     "author": "flawiddsouza",
-    "license": "ISC"
+    "license": "ISC",
+    "dependencies": {
+        "commander": "^12.1.0",
+        "shell-quote": "^1.8.1",
+        "yaml": "^2.5.1",
+        "zod": "^3.23.8"
+    }
 }

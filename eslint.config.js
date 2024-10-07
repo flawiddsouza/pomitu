@@ -25,6 +25,11 @@ export default [
         rules: {
             '@stylistic/js/indent': ['error', 4],
             '@stylistic/js/quotes': ['error', 'single'],
+            '@stylistic/js/keyword-spacing': ['error', { before: true, after: true }],
+            '@stylistic/js/block-spacing': ['error', 'always'],
+            '@stylistic/js/brace-style': ['error', '1tbs', { allowSingleLine: false }],
+            '@stylistic/js/function-call-spacing': ['error', 'never'],
+            '@stylistic/js/space-before-blocks': ['error', 'always'],
         }
     }
 ]
