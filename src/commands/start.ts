@@ -14,7 +14,8 @@ import * as fs from 'node:fs'
 export const start = new Command('start')
     .description('start and daemonize an app')
     .argument('<name>', '[name|namespace|file|ecosystem|id...]')
-    .action((name) => {
+    .option('--no-daemon', 'do not daemonize the app')
+    .action((name, options) => {
         const config = readConfig(name)
 
         for (const app of config.apps) {
@@ -60,7 +61,7 @@ export const start = new Command('start')
             const startedProcess = spawn(run[0], run.slice(1), {
                 cwd: app.cwd,
                 stdio: ['ignore', stdout, stderr],
-                detached: true,
+                detached: options.daemon,
             })
 
             startedProcess.on('error', (error) => {
@@ -72,7 +73,9 @@ export const start = new Command('start')
                 console.log(`Started: ${app.name} with pid ${startedProcess.pid}`)
             })
 
-            startedProcess.unref()
+            if (options.daemon) {
+                startedProcess.unref()
+            }
 
             fs.writeFileSync(getProcessPidFilePath(fileNameFriendAppName), startedProcess.pid!.toString())
         }
