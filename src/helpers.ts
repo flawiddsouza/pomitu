@@ -1,6 +1,6 @@
 import * as fs from 'node:fs'
 import * as YAML from 'yaml'
-import { configSchema } from './schema'
+import { configSchema } from './schema.js'
 import { homedir } from 'node:os'
 import * as path from 'node:path'
 

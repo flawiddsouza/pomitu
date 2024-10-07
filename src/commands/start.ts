@@ -7,9 +7,9 @@ import {
     getProcessLogErrorFilePath,
     getProcessPidFilePath,
     pidIsRunning,
-} from '../helpers'
+    getFileNameFriendlyName,
+} from '../helpers.js'
 import * as fs from 'node:fs'
-import { getFileNameFriendlyName } from '../helpers.js'
 
 export const start = new Command('start')
     .description('start and daemonize an app')

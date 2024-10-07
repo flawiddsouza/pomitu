@@ -4,7 +4,7 @@ import {
     getPomituPidsDirectory,
     getFileNameFriendlyName,
     pidIsRunning,
-} from '../helpers'
+} from '../helpers.js'
 
 export const stop = new Command('stop')
     .description('stop a running app or all apps')

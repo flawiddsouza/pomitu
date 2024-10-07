@@ -1,5 +1,5 @@
 import { Command } from 'commander'
-import { getPomituLogsDirectory } from '../helpers'
+import { getPomituLogsDirectory } from '../helpers.js'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 

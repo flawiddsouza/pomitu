@@ -1,6 +1,6 @@
 import { Command } from 'commander'
 import * as fs from 'node:fs'
-import { getPomituPidsDirectory, pidIsRunning } from '../helpers'
+import { getPomituPidsDirectory, pidIsRunning } from '../helpers.js'
 
 export const ls = new Command('ls')
     .description('list all running apps')

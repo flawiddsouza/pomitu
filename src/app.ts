@@ -1,11 +1,11 @@
-
+#! /usr/bin/env node
 import { Command } from 'commander'
-import { start } from './commands/start'
-import { flush } from './commands/flush'
-import { stop } from './commands/stop'
+import { start } from './commands/start.js'
+import { flush } from './commands/flush.js'
+import { stop } from './commands/stop.js'
 import { mkdirSync } from 'node:fs'
-import { ls } from './commands/ls'
-import { getPomituDirectory, getPomituLogsDirectory, getPomituPidsDirectory } from './helpers'
+import { ls } from './commands/ls.js'
+import { getPomituDirectory, getPomituLogsDirectory, getPomituPidsDirectory } from './helpers.js'
 
 function init() {
     mkdirSync(getPomituDirectory(), { recursive: true })
