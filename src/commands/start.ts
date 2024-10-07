@@ -1,12 +1,15 @@
 import { Command } from 'commander'
 import { spawn } from 'node:child_process'
 import { parse } from 'shell-quote'
-import { getPomituLogsDirectory, readConfig } from '../helpers'
+import {
+    readConfig,
+    getProcessLogOutFilePath,
+    getProcessLogErrorFilePath,
+    getProcessPidFilePath,
+    pidIsRunning,
+} from '../helpers'
 import * as fs from 'node:fs'
-import * as path from 'node:path'
 import { getFileNameFriendlyName } from '../helpers.js'
-
-const pomituLogsDirectory = getPomituLogsDirectory()
 
 export const start = new Command('start')
     .description('start and daemonize an app')
@@ -31,12 +34,33 @@ export const start = new Command('start')
 
             const fileNameFriendAppName = getFileNameFriendlyName(app.name)
 
-            const stdout = fs.openSync(path.join(pomituLogsDirectory, `${fileNameFriendAppName}-out.log`), 'a')
-            const stderr = fs.openSync(path.join(pomituLogsDirectory, `${fileNameFriendAppName}-error.log`), 'a')
+            const existingPidFilePath = getProcessPidFilePath(fileNameFriendAppName)
+
+            if (fs.existsSync(existingPidFilePath)) {
+                const existingPid = parseInt(fs.readFileSync(existingPidFilePath, 'utf-8'))
+
+                if (pidIsRunning(existingPid)) {
+                    console.warn(`Process ${app.name} is already running with pid ${existingPid}`)
+                    console.log(`Stopping ${app.name} at pid ${existingPid}`)
+
+                    try {
+                        process.kill(existingPid)
+                    } catch (e: unknown) {
+                        const error = e as Error
+                        console.error(`Error stopping ${app.name}: ${error.message}`)
+                    }
+                }
+
+                fs.unlinkSync(existingPidFilePath)
+            }
+
+            const stdout = fs.openSync(getProcessLogOutFilePath(fileNameFriendAppName), 'a')
+            const stderr = fs.openSync(getProcessLogErrorFilePath(fileNameFriendAppName), 'a')
 
             const startedProcess = spawn(run[0], run.slice(1), {
                 cwd: app.cwd,
                 stdio: ['ignore', stdout, stderr],
+                detached: true,
             })
 
             startedProcess.on('error', (error) => {
@@ -45,11 +69,11 @@ export const start = new Command('start')
             })
 
             startedProcess.on('spawn', () => {
-                console.log(`Started: ${app.name}`)
+                console.log(`Started: ${app.name} with pid ${startedProcess.pid}`)
             })
 
-            startedProcess.on('close', (code) => {
-                console.log(`Process ${app.name} exited with code ${code}`)
-            })
+            startedProcess.unref()
+
+            fs.writeFileSync(getProcessPidFilePath(fileNameFriendAppName), startedProcess.pid!.toString())
         }
     })
