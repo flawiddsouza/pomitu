@@ -15,6 +15,7 @@ export const start = new Command('start')
     .description('start and daemonize an app')
     .argument('<name>', '[name|namespace|file|ecosystem|id...]')
     .option('--no-daemon', 'do not daemonize the app')
+    .option('--clear-logs', 'clear log files before starting the app')
     .action((name, options) => {
         const config = readConfig(name)
 
@@ -55,8 +56,20 @@ export const start = new Command('start')
                 fs.unlinkSync(existingPidFilePath)
             }
 
-            const stdout = fs.openSync(getProcessLogOutFilePath(fileNameFriendAppName), 'a')
-            const stderr = fs.openSync(getProcessLogErrorFilePath(fileNameFriendAppName), 'a')
+            const stdoutPath = getProcessLogOutFilePath(fileNameFriendAppName)
+            const stderrPath = getProcessLogErrorFilePath(fileNameFriendAppName)
+
+            if (options.clearLogs) {
+                if (fs.existsSync(stdoutPath)) {
+                    fs.unlinkSync(stdoutPath)
+                }
+                if (fs.existsSync(stderrPath)) {
+                    fs.unlinkSync(stderrPath)
+                }
+            }
+
+            const stdout = fs.openSync(stdoutPath, 'a')
+            const stderr = fs.openSync(stderrPath, 'a')
 
             const startedProcess = spawn(run[0], run.slice(1), {
                 cwd: app.cwd,
