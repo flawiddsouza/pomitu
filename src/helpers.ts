@@ -1,21 +1,5 @@
-import * as fs from 'node:fs'
-import * as YAML from 'yaml'
-import { configSchema } from './schema.js'
 import { homedir } from 'node:os'
 import * as path from 'node:path'
-
-export function readConfig(configFilePath: string) {
-    const configParsed = YAML.parse(fs.readFileSync(configFilePath, 'utf8'))
-
-    const { success, data: config } = configSchema.safeParse(configParsed)
-
-    if (!success) {
-        console.error('Invalid config file')
-        process.exit(1)
-    }
-
-    return config
-}
 
 export function getPomituDirectory() {
     const homeDirectory = homedir()
@@ -40,10 +24,6 @@ export function getProcessLogOutFilePath(name: string) {
 
 export function getProcessLogErrorFilePath(name: string) {
     return path.join(getPomituLogsDirectory(), `${name}-error.log`)
-}
-
-export function getProcessPidFilePath(name: string) {
-    return path.join(getPomituPidsDirectory(), `${name}.pid`)
 }
 
 // From: https://stackoverflow.com/a/21296291/4932305

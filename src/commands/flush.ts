@@ -1,27 +1,22 @@
 import { Command } from 'commander'
-import { getPomituLogsDirectory } from '../helpers.js'
-import * as fs from 'node:fs'
-import * as path from 'node:path'
-
-const pomituLogsDirectory = getPomituLogsDirectory()
+import { LogManager } from '../services/index.js'
 
 export const flush = new Command('flush')
     .description('flush logs')
     .argument('[name]', 'name of the app whose logs you want to flush')
     .action((name) => {
-        let logs = fs.readdirSync(pomituLogsDirectory)
+        try {
+            const logManager = new LogManager()
+            const flushedFiles = logManager.flushLogs(name)
 
-
-        if (name) {
-            logs = logs.filter((log) => log.startsWith(name))
+            if (flushedFiles.length === 0) {
+                console.log('No log files found to flush')
+            } else {
+                console.log('Logs flushed')
+            }
+        } catch (error: unknown) {
+            const err = error as Error
+            console.error(`Error: ${err.message}`)
+            process.exit(1)
         }
-
-        const fullLogPaths = logs.map((log) => path.join(pomituLogsDirectory, log))
-
-        for (const logFilePath of fullLogPaths) {
-            console.log(`Flushing ${logFilePath}`)
-            fs.unlinkSync(logFilePath)
-        }
-
-        console.log('Logs flushed')
     })

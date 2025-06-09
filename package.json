@@ -1,6 +1,6 @@
 {
     "name": "pomitu",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "description": "Pomitu is a process manager inspired by PM2",
     "type": "module",
     "scripts": {

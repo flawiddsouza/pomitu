@@ -1,95 +1,28 @@
 import { Command } from 'commander'
-import { spawn } from 'node:child_process'
-import { parse } from 'shell-quote'
-import {
-    readConfig,
-    getProcessLogOutFilePath,
-    getProcessLogErrorFilePath,
-    getProcessPidFilePath,
-    pidIsRunning,
-    getFileNameFriendlyName,
-} from '../helpers.js'
-import * as fs from 'node:fs'
+import { ProcessManager, ConfigManager } from '../services/index.js'
 
 export const start = new Command('start')
     .description('start and daemonize an app')
     .argument('<name>', '[name|namespace|file|ecosystem|id...]')
     .option('--no-daemon', 'do not daemonize the app')
     .option('--clear-logs', 'clear log files before starting the app')
-    .action((name, options) => {
-        const config = readConfig(name)
+    .action(async (name, options) => {
+        try {
+            const configManager = new ConfigManager()
+            const processManager = new ProcessManager()
 
-        for (const app of config.apps) {
-            console.log(`Starting: ${app.name} (${app.cwd})`)
+            const config = configManager.readConfig(name)
+            configManager.validateConfig(config)
 
-            if (!fs.existsSync(app.cwd)) {
-                console.error(`Directory ${app.cwd} does not exist`)
-                process.exit(1)
+            for (const app of config.apps) {
+                processManager.startApp(app, {
+                    daemon: options.daemon,
+                    clearLogs: options.clearLogs
+                })
             }
-
-            const run = parse(app.run) as string[]
-
-            if (!run.length) {
-                console.error(`Invalid run command for ${app.name}: ${app.run}`)
-                process.exit(1)
-            }
-
-            const fileNameFriendAppName = getFileNameFriendlyName(app.name)
-
-            const existingPidFilePath = getProcessPidFilePath(fileNameFriendAppName)
-
-            if (fs.existsSync(existingPidFilePath)) {
-                const existingPid = parseInt(fs.readFileSync(existingPidFilePath, 'utf-8'))
-
-                if (pidIsRunning(existingPid)) {
-                    console.warn(`Process ${app.name} is already running with pid ${existingPid}`)
-                    console.log(`Stopping ${app.name} at pid ${existingPid}`)
-
-                    try {
-                        process.kill(existingPid)
-                    } catch (e: unknown) {
-                        const error = e as Error
-                        console.error(`Error stopping ${app.name}: ${error.message}`)
-                    }
-                }
-
-                fs.unlinkSync(existingPidFilePath)
-            }
-
-            const stdoutPath = getProcessLogOutFilePath(fileNameFriendAppName)
-            const stderrPath = getProcessLogErrorFilePath(fileNameFriendAppName)
-
-            if (options.clearLogs) {
-                if (fs.existsSync(stdoutPath)) {
-                    fs.unlinkSync(stdoutPath)
-                }
-                if (fs.existsSync(stderrPath)) {
-                    fs.unlinkSync(stderrPath)
-                }
-            }
-
-            const stdout = fs.openSync(stdoutPath, 'a')
-            const stderr = fs.openSync(stderrPath, 'a')
-
-            const startedProcess = spawn(run[0], run.slice(1), {
-                cwd: app.cwd,
-                stdio: ['ignore', stdout, stderr],
-                detached: options.daemon,
-            })
-
-            startedProcess.on('error', (error) => {
-                console.error(`Error starting ${app.name}: ${error.message}`)
-                process.exit(1)
-            })
-
-            startedProcess.on('spawn', () => {
-                console.log(`Started: ${app.name} with pid ${startedProcess.pid}`)
-            })
-
-            if (options.daemon) {
-                startedProcess.unref()
-            }
-
-            fs.writeFileSync(getProcessPidFilePath(fileNameFriendAppName), startedProcess.pid!.toString())
+        } catch (error: unknown) {
+            const err = error as Error
+            console.error(`Error: ${err.message}`)
+            process.exit(1)
         }
     })
