@@ -22,12 +22,20 @@ export interface StartOptions {
     clearLogs?: boolean
 }
 
+export interface StopOptions {
+    quiet?: boolean
+}
+
 export class ProcessManager {
     private pidManager = new PidManager()
     private logManager = new LogManager()
 
     async startApp(app: AppConfig, options: StartOptions = {}): Promise<void> {
-        console.log(`Starting: ${app.name} (${app.cwd})`)
+        const isDaemon = options.daemon ?? true
+
+        if (isDaemon) {
+            console.log(`Starting: ${app.name} (${app.cwd})`)
+        }
 
         if (!fs.existsSync(app.cwd)) {
             throw new Error(`Directory ${app.cwd} does not exist`)
@@ -54,10 +62,13 @@ export class ProcessManager {
         // Save PID
         this.pidManager.savePid(fileNameFriendAppName, process.pid!)
 
-        console.log(`Started: ${app.name} with pid ${process.pid}`)
+        if (isDaemon) {
+            console.log(`Started: ${app.name} with pid ${process.pid}`)
+        }
     }
 
-    async stopApp(name: string): Promise<boolean> {
+    async stopApp(name: string, options: StopOptions = {}): Promise<boolean> {
+        const quiet = options.quiet ?? false
         const fileNameFriendlyName = getFileNameFriendlyName(name)
         const pid = this.pidManager.getPid(fileNameFriendlyName)
 
@@ -71,12 +82,16 @@ export class ProcessManager {
             return false
         }
 
-        console.log(`Stopping ${name} with pid ${pid}`)
+        if (!quiet) {
+            console.log(`Stopping ${name} with pid ${pid}`)
+        }
 
         try {
             process.kill(pid)
             this.pidManager.removePid(fileNameFriendlyName)
-            console.log(`${name} with pid ${pid} stopped`)
+            if (!quiet) {
+                console.log(`${name} with pid ${pid} stopped`)
+            }
             return true
         } catch (error: unknown) {
             const err = error as Error
@@ -85,12 +100,12 @@ export class ProcessManager {
         }
     }
 
-    async stopAllApps(): Promise<number> {
+    async stopAllApps(options: StopOptions = {}): Promise<number> {
         const runningProcesses = this.listRunningProcesses()
         let stoppedCount = 0
 
         for (const processInfo of runningProcesses) {
-            const success = await this.stopApp(processInfo.name)
+            const success = await this.stopApp(processInfo.name, options)
             if (success) {
                 stoppedCount++
             }

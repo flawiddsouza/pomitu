@@ -22,6 +22,25 @@ pomitu start <config-file>
 
 This command starts and daemonizes an app based on the configuration file provided.
 
+#### Interactive Mode (TUI)
+
+```sh
+pomitu start <config-file> --no-daemon
+```
+
+Run in interactive mode with a Terminal User Interface (TUI) that allows you to:
+- View the status of all processes in real-time
+- Start, stop, and restart individual apps
+- Navigate with arrow keys
+- Press `q` to quit
+
+The interactive mode is perfect for development when you want to manage multiple processes and see their status at a glance.
+
+#### Options
+
+- `--no-daemon` - Run in interactive TUI mode instead of daemonizing
+- `--clear-logs` - Clear log files before starting the app
+
 ### Stop an application
 
 ```sh
@@ -29,6 +48,8 @@ pomitu stop <name>
 ```
 
 This command stops a running app. Use `pomitu stop all` to stop all running apps.
+
+**Note:** In interactive TUI mode (`--no-daemon`), you can stop apps directly from the interface instead of using this command.
 
 ### List running applications
 
@@ -77,7 +98,7 @@ If you want to contribute to Pomitu or run it in development mode:
 Dev installation test:
 
 ```sh
-npm run build && npm pack && npm install -g pomitu-1.0.1.tgz && rm pomitu-1.0.1.tgz
+npm run build && npm pack && npm install -g pomitu-1.1.1.tgz && rm pomitu-1.1.1.tgz
 ```
 
 ### Linting
