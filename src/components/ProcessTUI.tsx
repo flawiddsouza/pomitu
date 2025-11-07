@@ -25,6 +25,7 @@ export function ProcessTUI({ configPath, clearLogs }: ProcessTUIProps) {
     const [message, setMessage] = useState<string>('')
     const [messageColor, setMessageColor] = useState<'green' | 'red' | 'yellow'>('green')
     const [isProcessing, setIsProcessing] = useState(false)
+    const [isReloading, setIsReloading] = useState(false)
     const previousRawModeRef = useRef(false)
     const rawModeCapturedRef = useRef(false)
 
@@ -59,6 +60,69 @@ export function ProcessTUI({ configPath, clearLogs }: ProcessTUIProps) {
                 }
             })
         }, [apps, processManager])
+
+    // Reload config function
+    const reloadConfig = useCallback(async () => {
+        if (isReloading || isProcessing) return
+
+        setIsReloading(true)
+        setMessage('Reloading configuration...')
+        setMessageColor('yellow')
+
+        try {
+            const config = configManager.readConfig(configPath)
+            configManager.validateConfig(config)
+
+            // Check for removed apps and stop them if running
+            const oldAppNames = new Set(apps.map(app => app.name))
+            const newAppNames = new Set(config.apps.map(app => app.name))
+
+            const removedApps = Array.from(oldAppNames).filter(name => !newAppNames.has(name))
+
+            const stoppedApps: string[] = []
+            if (removedApps.length > 0) {
+                // Check which removed apps are actually running
+                const currentProcesses = processes.filter(p =>
+                    removedApps.includes(p.name) && p.isRunning
+                )
+
+                if (currentProcesses.length > 0) {
+                    setMessage(`Stopping removed apps: ${currentProcesses.map(p => p.name).join(', ')}...`)
+
+                    for (const proc of currentProcesses) {
+                        try {
+                            const success = await processManager.stopApp(proc.name, { quiet: true })
+                            if (success) {
+                                stoppedApps.push(proc.name)
+                            }
+                        } catch (error: unknown) {
+                            // Continue even if stop fails
+                            console.error(`Failed to stop ${proc.name}:`, error)
+                        }
+                    }
+                }
+            }
+
+            setApps(config.apps)
+
+            if (stoppedApps.length > 0) {
+                setMessage(`Configuration reloaded. Stopped ${stoppedApps.length} running app(s): ${stoppedApps.join(', ')}`)
+            } else if (removedApps.length > 0) {
+                setMessage(`Configuration reloaded. ${removedApps.length} app(s) removed (none were running)`)
+            } else {
+                setMessage('Configuration reloaded successfully')
+            }
+            setMessageColor('green')
+        } catch (error: unknown) {
+            const err = error as Error
+            setMessage(`Error reloading config: ${err.message}`)
+            setMessageColor('red')
+        } finally {
+            setIsReloading(false)
+            // Clear message after 3 seconds
+            setTimeout(() => setMessage(''), 3000)
+        }
+    }, [configPath, configManager, isReloading, isProcessing, apps, processes, processManager])
 
     // Load config on mount
     useEffect(() => {
@@ -101,6 +165,10 @@ export function ProcessTUI({ configPath, clearLogs }: ProcessTUIProps) {
                 cleanExit()
             }
 
+            if (str === 'r') {
+                reloadConfig()
+            }
+
             if (key?.ctrl && key.name === 'c') {
                 cleanExit()
             }
@@ -117,7 +185,7 @@ export function ProcessTUI({ configPath, clearLogs }: ProcessTUIProps) {
                 setRawMode(previousRawModeRef.current)
             }
         }
-    }, [stdin, setRawMode, cleanExit])
+    }, [stdin, setRawMode, cleanExit, reloadConfig])
 
     // Handle Ctrl+C signal directly - use prependListener to be first
     useEffect(() => {
@@ -134,7 +202,7 @@ export function ProcessTUI({ configPath, clearLogs }: ProcessTUIProps) {
     }, [cleanExit])
 
     const handleSelect = useCallback(async (item: { label: string; value: string }) => {
-        if (isProcessing) return // Prevent multiple simultaneous operations
+        if (isProcessing || isReloading) return // Prevent multiple simultaneous operations
 
         const [action, appName] = item.value.split(':')
         const app = apps.find(a => a.name === appName)
@@ -192,7 +260,7 @@ export function ProcessTUI({ configPath, clearLogs }: ProcessTUIProps) {
 
         // Clear message after 3 seconds
         setTimeout(() => setMessage(''), 3000)
-    }, [apps, clearLogs, computeStatuses, processManager, isProcessing])
+    }, [apps, clearLogs, computeStatuses, processManager, isProcessing, isReloading])
 
     const getMenuItems = useCallback(() => {
         const items: Array<{ label: string; value: string }> = []
@@ -237,8 +305,8 @@ export function ProcessTUI({ configPath, clearLogs }: ProcessTUIProps) {
         }
     }, [handleSelect])
 
-    const notificationText = isProcessing ? 'Processing...' : message
-    const notificationColor = isProcessing ? 'yellow' : message ? messageColor : undefined
+    const notificationText = isProcessing ? 'Processing...' : (isReloading ? 'Reloading...' : message)
+    const notificationColor = (isProcessing || isReloading) ? 'yellow' : message ? messageColor : undefined
 
     return (
         <Box flexDirection="column">
@@ -249,9 +317,9 @@ export function ProcessTUI({ configPath, clearLogs }: ProcessTUIProps) {
             {processes.length > 0 ? (
                 <>
                     <Box marginBottom={1}>
-                        <Text dimColor>Use arrow keys to navigate, Enter to select, 'q' or Ctrl+C to quit</Text>
+                        <Text dimColor>Use arrow keys to navigate, Enter to select, 'r' to reload config, 'q' or Ctrl+C to quit</Text>
                     </Box>
-                    <SelectInput items={items} onSelect={handleMenuSelect} isFocused={!isProcessing} />
+                    <SelectInput items={items} onSelect={handleMenuSelect} isFocused={!isProcessing && !isReloading} />
                 </>
             ) : (
                 <Text>Loading processes...</Text>
