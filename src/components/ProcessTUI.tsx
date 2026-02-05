@@ -1,9 +1,11 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import readline from 'node:readline'
+import { existsSync } from 'node:fs'
+import open from 'open'
 import { Box, Text, useApp, useStdin } from 'ink'
 import SelectInput from 'ink-select-input'
 import { ProcessManager, ConfigManager } from '../services/index.js'
-import { getFileNameFriendlyName } from '../helpers.js'
+import { getFileNameFriendlyName, getProcessLogOutFilePath, getProcessLogErrorFilePath } from '../helpers.js'
 import type { AppConfig } from '../services/ConfigManager.js'
 
 interface ProcessTUIProps {
@@ -32,6 +34,26 @@ export function ProcessTUI({ configPath, clearLogs }: ProcessTUIProps) {
     // Create managers only once
     const processManager = useMemo(() => new ProcessManager(), [])
     const configManager = useMemo(() => new ConfigManager(), [])
+
+    // Function to open file in native app
+    const openFileInNativeApp = useCallback(async (filePath: string) => {
+        if (!existsSync(filePath)) {
+            setMessage(`Log file not found: ${filePath}`)
+            setMessageColor('red')
+            setTimeout(() => setMessage(''), 3000)
+            return
+        }
+
+        try {
+            await open(filePath)
+            setMessage(`Opening log file...`)
+            setMessageColor('green')
+        } catch (error) {
+            setMessage(`Failed to open log: ${error instanceof Error ? error.message : String(error)}`)
+            setMessageColor('red')
+        }
+        setTimeout(() => setMessage(''), 3000)
+    }, [])
 
     const cleanExit = useCallback(() => {
         if (setRawMode) {
@@ -247,6 +269,18 @@ export function ProcessTUI({ configPath, clearLogs }: ProcessTUIProps) {
                     setMessage(`Failed to stop ${appName} for restart`)
                     setMessageColor('red')
                 }
+            } else if (action === 'viewout') {
+                const fileNameFriendly = getFileNameFriendlyName(appName)
+                const logPath = getProcessLogOutFilePath(fileNameFriendly)
+                openFileInNativeApp(logPath)
+                setIsProcessing(false)
+                return
+            } else if (action === 'viewerr') {
+                const fileNameFriendly = getFileNameFriendlyName(appName)
+                const logPath = getProcessLogErrorFilePath(fileNameFriendly)
+                openFileInNativeApp(logPath)
+                setIsProcessing(false)
+                return
             }
 
             setProcesses(computeStatuses())
@@ -281,13 +315,29 @@ export function ProcessTUI({ configPath, clearLogs }: ProcessTUIProps) {
                     value: `stop:${proc.name}`
                 })
                 items.push({
-                    label: `  └─ Restart ${proc.name}`,
+                    label: `  ├─ Restart ${proc.name}`,
                     value: `restart:${proc.name}`
+                })
+                items.push({
+                    label: `  ├─ View Output Log`,
+                    value: `viewout:${proc.name}`
+                })
+                items.push({
+                    label: `  └─ View Error Log`,
+                    value: `viewerr:${proc.name}`
                 })
             } else {
                 items.push({
-                    label: `  └─ Start ${proc.name}`,
+                    label: `  ├─ Start ${proc.name}`,
                     value: `start:${proc.name}`
+                })
+                items.push({
+                    label: `  ├─ View Output Log`,
+                    value: `viewout:${proc.name}`
+                })
+                items.push({
+                    label: `  └─ View Error Log`,
+                    value: `viewerr:${proc.name}`
                 })
             }
         })
