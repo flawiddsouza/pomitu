@@ -48,7 +48,7 @@ export function ProcessTUI({ configPath, clearLogs }: ProcessTUIProps) {
 
         try {
             await open(filePath)
-            setMessage(`Opening log file...`)
+            setMessage('Opening log file...')
             setMessageColor('green')
         } catch (error) {
             setMessage(`Failed to open log: ${error instanceof Error ? error.message : String(error)}`)
@@ -66,24 +66,24 @@ export function ProcessTUI({ configPath, clearLogs }: ProcessTUIProps) {
         process.exit(0)
     }, [exit, setRawMode])
 
-        const computeStatuses = useCallback((): ProcessStatus[] => {
-            if (apps.length === 0) {
-                return []
+    const computeStatuses = useCallback((): ProcessStatus[] => {
+        if (apps.length === 0) {
+            return []
+        }
+
+        const runningProcesses = processManager.listRunningProcesses()
+
+        return apps.map(app => {
+            const fileNameFriendlyName = getFileNameFriendlyName(app.name)
+            const running = runningProcesses.find(p => p.name === fileNameFriendlyName)
+
+            return {
+                name: app.name,
+                pid: running?.pid ?? null,
+                isRunning: running?.isRunning ?? false
             }
-
-            const runningProcesses = processManager.listRunningProcesses()
-
-            return apps.map(app => {
-                const fileNameFriendlyName = getFileNameFriendlyName(app.name)
-                const running = runningProcesses.find(p => p.name === fileNameFriendlyName)
-
-                return {
-                    name: app.name,
-                    pid: running?.pid ?? null,
-                    isRunning: running?.isRunning ?? false
-                }
-            })
-        }, [apps, processManager])
+        })
+    }, [apps, processManager])
 
     // Reload config function
     const reloadConfig = useCallback(async () => {
@@ -353,11 +353,11 @@ export function ProcessTUI({ configPath, clearLogs }: ProcessTUIProps) {
                     value: `restart:${proc.name}`
                 })
                 items.push({
-                    label: `  ├─ View Output Log`,
+                    label: '  ├─ View Output Log',
                     value: `viewout:${proc.name}`
                 })
                 items.push({
-                    label: `  └─ View Error Log`,
+                    label: '  └─ View Error Log',
                     value: `viewerr:${proc.name}`
                 })
             } else {
@@ -366,11 +366,11 @@ export function ProcessTUI({ configPath, clearLogs }: ProcessTUIProps) {
                     value: `start:${proc.name}`
                 })
                 items.push({
-                    label: `  ├─ View Output Log`,
+                    label: '  ├─ View Output Log',
                     value: `viewout:${proc.name}`
                 })
                 items.push({
-                    label: `  └─ View Error Log`,
+                    label: '  └─ View Error Log',
                     value: `viewerr:${proc.name}`
                 })
             }
