@@ -100,20 +100,6 @@ export class ProcessManager {
         }
     }
 
-    async stopAllApps(options: StopOptions = {}): Promise<number> {
-        const runningProcesses = this.listRunningProcesses()
-        let stoppedCount = 0
-
-        for (const processInfo of runningProcesses) {
-            const success = await this.stopApp(processInfo.name, options)
-            if (success) {
-                stoppedCount++
-            }
-        }
-
-        return stoppedCount
-    }
-
     listRunningProcesses(): ProcessInfo[] {
         const pidFiles = this.pidManager.getAllPidFiles()
         const processes: ProcessInfo[] = []

@@ -5,7 +5,10 @@ import open from 'open'
 import { Box, Text, useApp, useStdin } from 'ink'
 import SelectInput from 'ink-select-input'
 import { ProcessManager, ConfigManager } from '../services/index.js'
-import { getFileNameFriendlyName, getProcessLogOutFilePath, getProcessLogErrorFilePath } from '../helpers.js'
+import { getFileNameFriendlyName, getProcessLogOutFilePath, getProcessLogErrorFilePath, getPomituSignalsDirectory } from '../helpers.js'
+import chokidar from 'chokidar'
+import * as path from 'node:path'
+import { writeTuiPresence, clearTuiPresence, readAndClearSignal } from '../services/IpcSignal.js'
 import type { AppConfig } from '../services/ConfigManager.js'
 
 interface ProcessTUIProps {
@@ -32,6 +35,8 @@ export function ProcessTUI({ configPath, clearLogs }: ProcessTUIProps) {
     const [searchQuery, setSearchQuery] = useState('')
     const previousRawModeRef = useRef(false)
     const rawModeCapturedRef = useRef(false)
+    const appsRef = useRef<AppConfig[]>([])
+    const ipcHandlerRef = useRef<((appName: string, action: string) => void) | null>(null)
 
     // Create managers only once
     const processManager = useMemo(() => new ProcessManager(), [])
@@ -58,6 +63,7 @@ export function ProcessTUI({ configPath, clearLogs }: ProcessTUIProps) {
     }, [])
 
     const cleanExit = useCallback(() => {
+        appsRef.current.forEach(app => clearTuiPresence(app.name))
         if (setRawMode) {
             setRawMode(previousRawModeRef.current)
         }
@@ -166,6 +172,36 @@ export function ProcessTUI({ configPath, clearLogs }: ProcessTUIProps) {
         setProcesses(computeStatuses())
     }, [computeStatuses])
 
+    // Sync appsRef and write TUI presence files whenever apps change
+    useEffect(() => {
+        appsRef.current = apps
+        apps.forEach(app => writeTuiPresence(app.name))
+    }, [apps])
+
+    // Set up chokidar watcher for IPC signals (mounted once; uses refs for latest state)
+    useEffect(() => {
+        const signalsDir = getPomituSignalsDirectory()
+        const watcher = chokidar.watch(signalsDir, { ignoreInitial: true })
+
+        const handleSignalFile = (filePath: string) => {
+            const fileBaseName = path.basename(filePath, '.json')
+            const matchedApp = appsRef.current.find(a => getFileNameFriendlyName(a.name) === fileBaseName)
+            if (!matchedApp) return
+            const action = readAndClearSignal(matchedApp.name)
+            if (!action) return
+            if (ipcHandlerRef.current) {
+                ipcHandlerRef.current(matchedApp.name, action)
+            }
+        }
+
+        watcher.on('add', handleSignalFile)
+        watcher.on('change', handleSignalFile)
+
+        return () => {
+            watcher.close()
+        }
+    }, [])
+
     // Handle keyboard input - use keypress events to intercept BEFORE SelectInput
     useEffect(() => {
         if (!stdin) return
@@ -260,7 +296,9 @@ export function ProcessTUI({ configPath, clearLogs }: ProcessTUIProps) {
     const handleSelect = useCallback(async (item: { label: string; value: string }) => {
         if (isProcessing || isReloading) return // Prevent multiple simultaneous operations
 
-        const [action, appName] = item.value.split(':')
+        const colonIndex = item.value.indexOf(':')
+        const action = item.value.slice(0, colonIndex)
+        const appName = item.value.slice(colonIndex + 1)
         const app = apps.find(a => a.name === appName)
 
         if (!app) {
@@ -289,20 +327,17 @@ export function ProcessTUI({ configPath, clearLogs }: ProcessTUIProps) {
                     setMessageColor('red')
                 }
             } else if (action === 'restart') {
-                const success = await processManager.stopApp(appName, { quiet: true })
-                if (success) {
+                const wasRunning = await processManager.stopApp(appName, { quiet: true })
+                if (wasRunning) {
                     // Wait a bit before restarting
                     await new Promise(resolve => setTimeout(resolve, 500))
-                    await processManager.startApp(app, {
-                        daemon: false,
-                        clearLogs: clearLogs ?? false
-                    })
-                    setMessage(`Restarted ${appName}`)
-                    setMessageColor('green')
-                } else {
-                    setMessage(`Failed to stop ${appName} for restart`)
-                    setMessageColor('red')
                 }
+                await processManager.startApp(app, {
+                    daemon: false,
+                    clearLogs: clearLogs ?? false
+                })
+                setMessage(`Restarted ${appName}`)
+                setMessageColor('green')
             } else if (action === 'viewout') {
                 const fileNameFriendly = getFileNameFriendlyName(appName)
                 const logPath = getProcessLogOutFilePath(fileNameFriendly)
@@ -395,6 +430,13 @@ export function ProcessTUI({ configPath, clearLogs }: ProcessTUIProps) {
             // Informational rows are read-only
         } else {
             handleSelect(item)
+        }
+    }, [handleSelect])
+
+    // Keep IPC signal handler up to date with current handleSelect
+    useEffect(() => {
+        ipcHandlerRef.current = (appName: string, action: string) => {
+            handleSelect({ label: '', value: `${action}:${appName}` })
         }
     }, [handleSelect])
 

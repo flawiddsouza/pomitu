@@ -42,7 +42,7 @@ export class PidManager {
             return []
         }
 
-        return fs.readdirSync(this.pidsDirectory).filter(file => file.endsWith('.pid'))
+        return fs.readdirSync(this.pidsDirectory).filter(file => file.endsWith('.pid') && !file.endsWith('-tui.pid'))
     }
 
     private getPidFilePath(appName: string): string {

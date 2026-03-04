@@ -18,6 +18,18 @@ export function getFileNameFriendlyName(name: string) {
     return name.replaceAll(' ', '-').toLowerCase()
 }
 
+export function getPomituSignalsDirectory() {
+    return path.join(getPomituDirectory(), 'signals')
+}
+
+export function getProcessSignalPath(name: string) {
+    return path.join(getPomituSignalsDirectory(), `${name}.json`)
+}
+
+export function getTuiPidPath(name: string) {
+    return path.join(getPomituPidsDirectory(), `${name}-tui.pid`)
+}
+
 export function getProcessLogOutFilePath(name: string) {
     return path.join(getPomituLogsDirectory(), `${name}-out.log`)
 }

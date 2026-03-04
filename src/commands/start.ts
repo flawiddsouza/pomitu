@@ -1,5 +1,8 @@
 import { Command } from 'commander'
 import { ProcessManager, ConfigManager } from '../services/index.js'
+import { isTuiActive, writeSignal, waitForPidState } from '../services/IpcSignal.js'
+import { PidManager } from '../services/PidManager.js'
+import { getFileNameFriendlyName, pidIsRunning } from '../helpers.js'
 import React from 'react'
 import { render } from 'ink'
 import { ProcessTUI } from '../components/ProcessTUI.js'
@@ -18,15 +21,36 @@ export const start = new Command('start')
             configManager.validateConfig(config)
 
             const runInteractive = options.daemon === false
+            let anyTuiActive = false
+            const pidManager = new PidManager()
 
             for (const app of config.apps) {
-                processManager.startApp(app, {
-                    daemon: options.daemon,
-                    clearLogs: options.clearLogs
-                })
+                if (isTuiActive(app.name)) {
+                    anyTuiActive = true
+                    const existingPid = pidManager.getPid(getFileNameFriendlyName(app.name))
+                    const wasRunning = existingPid !== null && pidIsRunning(existingPid)
+                    writeSignal(app.name, 'start')
+                    if (!runInteractive) {
+                        if (wasRunning) {
+                            await waitForPidState(app.name, 'absent', 3000)
+                        }
+                        const confirmed = await waitForPidState(app.name, 'present', 3000)
+                        if (confirmed) {
+                            const pid = pidManager.getPid(getFileNameFriendlyName(app.name))
+                            console.log(`Started ${app.name} with pid ${pid}`)
+                        } else {
+                            console.warn(`Start signal sent but could not confirm ${app.name} started within timeout`)
+                        }
+                    }
+                } else {
+                    processManager.startApp(app, {
+                        daemon: options.daemon,
+                        clearLogs: options.clearLogs
+                    })
+                }
             }
 
-            if (runInteractive) {
+            if (runInteractive && !anyTuiActive) {
                 render(React.createElement(ProcessTUI, {
                     configPath: name,
                     clearLogs: options.clearLogs
