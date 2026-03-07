@@ -3,7 +3,7 @@ import readline from 'node:readline'
 import { existsSync } from 'node:fs'
 import open from 'open'
 import { Box, Text, useApp, useStdin } from 'ink'
-import SelectInput from 'ink-select-input'
+import { PersistentSelectInput } from './PersistentSelectInput.js'
 import { ProcessManager, ConfigManager } from '../services/index.js'
 import { getFileNameFriendlyName, getProcessLogOutFilePath, getProcessLogErrorFilePath, getPomituSignalsDirectory } from '../helpers.js'
 import chokidar from 'chokidar'
@@ -243,7 +243,6 @@ export function ProcessTUI({ configPath, clearLogs }: ProcessTUIProps) {
                 return
             }
 
-            // Normal mode
             if (str === 'q') {
                 cleanExit()
             }
@@ -365,10 +364,10 @@ export function ProcessTUI({ configPath, clearLogs }: ProcessTUIProps) {
         setTimeout(() => setMessage(''), 3000)
     }, [apps, clearLogs, computeStatuses, processManager, isProcessing, isReloading])
 
-    const getMenuItems = useCallback(() => {
+    const buildMenuItems = useCallback((statuses: ProcessStatus[]) => {
         const items: Array<{ label: string; value: string }> = []
 
-        processes.forEach(proc => {
+        statuses.forEach(proc => {
             const statusLabel = proc.isRunning
                 ? `🟢 Running (PID: ${proc.pid})`
                 : '🔴 Stopped'
@@ -412,10 +411,10 @@ export function ProcessTUI({ configPath, clearLogs }: ProcessTUIProps) {
         })
 
         return items
-    }, [processes])
+    }, [])
 
     const items = useMemo(() => {
-        const allItems = getMenuItems()
+        const allItems = buildMenuItems(processes)
         if (!searchQuery) return allItems
 
         const query = searchQuery.toLowerCase()
@@ -423,7 +422,7 @@ export function ProcessTUI({ configPath, clearLogs }: ProcessTUIProps) {
             item.label.toLowerCase().includes(query) ||
             item.value.toLowerCase().includes(query)
         )
-    }, [getMenuItems, searchQuery])
+    }, [buildMenuItems, processes, searchQuery])
 
     const handleMenuSelect = useCallback((item: { label: string; value: string }) => {
         if (item.value === 'separator' || item.value.startsWith('info:')) {
@@ -471,7 +470,7 @@ export function ProcessTUI({ configPath, clearLogs }: ProcessTUIProps) {
                             <Text dimColor>Showing 15 of {items.length} items - scroll with ↑↓ arrows</Text>
                         </Box>
                     )}
-                    <SelectInput items={items} onSelect={handleMenuSelect} isFocused={!isProcessing && !isReloading && !searchMode} limit={15} />
+                    <PersistentSelectInput items={items} onSelect={handleMenuSelect} isFocused={!isProcessing && !isReloading && !searchMode} limit={15} />
                 </>
             ) : (
                 <Text>Loading processes...</Text>
