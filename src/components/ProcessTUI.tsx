@@ -259,6 +259,14 @@ export function ProcessTUI({ configPath, clearLogs }: ProcessTUIProps) {
                 reloadConfig()
             }
 
+            if (str === 'e') {
+                open(configPath).catch(error => {
+                    setMessage(`Failed to open config: ${error instanceof Error ? error.message : String(error)}`)
+                    setMessageColor('red')
+                    setTimeout(() => setMessage(''), 3000)
+                })
+            }
+
             if (str === '/') {
                 setSearchMode(true)
                 setSearchQuery('')
@@ -479,7 +487,7 @@ export function ProcessTUI({ configPath, clearLogs }: ProcessTUIProps) {
             {processes.length > 0 ? (
                 <>
                     <Box marginBottom={1}>
-                        <Text dimColor>Use arrow keys to navigate, Enter to select, '/' to search, 'r' to reload, 'q' or Ctrl+C to quit</Text>
+                        <Text dimColor>Use arrow keys to navigate, Enter to select, '/' to search, 'r' to reload, 'e' to edit config, 'q' or Ctrl+C to quit</Text>
                     </Box>
                     {searchMode && (
                         <Box marginBottom={1}>
