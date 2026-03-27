@@ -50,6 +50,10 @@ export const start = new Command('start')
                 }
             }
 
+            if (runInteractive && anyTuiActive) {
+                console.log('A TUI session is already running in another terminal — not opening a new one')
+            }
+
             if (runInteractive && !anyTuiActive) {
                 render(React.createElement(ProcessTUI, {
                     configPath: name,

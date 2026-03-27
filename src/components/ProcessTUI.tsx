@@ -178,6 +178,14 @@ export function ProcessTUI({ configPath, clearLogs }: ProcessTUIProps) {
         apps.forEach(app => writeTuiPresence(app.name))
     }, [apps])
 
+    // Heartbeat: refresh TUI presence file mtimes so isTuiActive can detect stale files
+    useEffect(() => {
+        const interval = setInterval(() => {
+            appsRef.current.forEach(app => writeTuiPresence(app.name))
+        }, 10000)
+        return () => clearInterval(interval)
+    }, [])
+
     // Set up chokidar watcher for IPC signals (mounted once; uses refs for latest state)
     useEffect(() => {
         const signalsDir = getPomituSignalsDirectory()

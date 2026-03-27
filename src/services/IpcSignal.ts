@@ -24,14 +24,20 @@ export function clearTuiPresence(appName: string): void {
     }
 }
 
+const TUI_HEARTBEAT_MAX_AGE_MS = 30000
+
 export function isTuiActive(appName: string): boolean {
     const tuiPidPath = getTuiPidPath(getFileNameFriendlyName(appName))
     if (!fs.existsSync(tuiPidPath)) {
         return false
     }
     try {
-        const pid = parseInt(fs.readFileSync(tuiPidPath, 'utf-8'))
-        return !isNaN(pid) && pidIsRunning(pid)
+        const stat = fs.statSync(tuiPidPath)
+        if (Date.now() - stat.mtimeMs > TUI_HEARTBEAT_MAX_AGE_MS) {
+            fs.unlinkSync(tuiPidPath)
+            return false
+        }
+        return true
     } catch {
         return false
     }
