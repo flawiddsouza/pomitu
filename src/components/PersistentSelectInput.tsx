@@ -24,6 +24,7 @@ type Props<V> = {
     itemComponent?: FC<ItemProps>
     onSelect?: (item: SelectItem<V>) => void
     onHighlight?: (item: SelectItem<V>) => void
+    headingPredicate?: (item: SelectItem<V>) => boolean
 }
 
 function rotateArray<T>(arr: T[], k: number): T[] {
@@ -43,6 +44,7 @@ export function PersistentSelectInput<V>({
     limit: customLimit,
     onSelect,
     onHighlight,
+    headingPredicate,
 }: Props<V>) {
     const hasLimit = typeof customLimit === 'number' && items.length > customLimit
     const limit = hasLimit ? Math.min(customLimit, items.length) : items.length
@@ -168,6 +170,50 @@ export function PersistentSelectInput<V>({
             }
         }
 
+        if (key.pageUp || key.pageDown) {
+            const absIndex = hasLimit ? -rotateIndex + selectedIndex : selectedIndex
+            let targetAbs = -1
+
+            if (headingPredicate) {
+                if (key.pageUp) {
+                    for (let i = absIndex - 1; i >= 0; i--) {
+                        if (items[i] && headingPredicate(items[i]!)) { targetAbs = i; break }
+                    }
+                } else {
+                    for (let i = absIndex + 1; i < items.length; i++) {
+                        if (items[i] && headingPredicate(items[i]!)) { targetAbs = i; break }
+                    }
+                }
+            } else {
+                targetAbs = key.pageUp
+                    ? Math.max(absIndex - limit, 0)
+                    : Math.min(absIndex + limit, items.length - 1)
+            }
+
+            if (targetAbs < 0) return
+
+            if (hasLimit) {
+                const windowStart = -rotateIndex
+                let newWindowStart: number
+                if (targetAbs < windowStart) {
+                    newWindowStart = targetAbs
+                } else if (targetAbs >= windowStart + limit) {
+                    newWindowStart = Math.min(targetAbs, items.length - limit)
+                } else {
+                    newWindowStart = windowStart
+                }
+                const newRotateIndex = -newWindowStart
+                const newSelectedIndex = targetAbs - newWindowStart
+                setRotateIndex(newRotateIndex)
+                setSelectedIndex(newSelectedIndex)
+                const sliced = rotateArray(items, newRotateIndex).slice(0, limit)
+                if (typeof onHighlight === 'function' && sliced[newSelectedIndex]) onHighlight(sliced[newSelectedIndex])
+            } else {
+                setSelectedIndex(targetAbs)
+                if (typeof onHighlight === 'function' && items[targetAbs]) onHighlight(items[targetAbs]!)
+            }
+        }
+
         if (/^[1-9]$/.test(input)) {
             const targetIndex = Number.parseInt(input, 10) - 1
             const visibleItems = hasLimit
@@ -189,7 +235,7 @@ export function PersistentSelectInput<V>({
                 onSelect(slicedItems[selectedIndex])
             }
         }
-    }, [hasLimit, limit, rotateIndex, selectedIndex, items, onSelect, onHighlight]), { isActive: isFocused })
+    }, [hasLimit, limit, rotateIndex, selectedIndex, items, onSelect, onHighlight, headingPredicate]), { isActive: isFocused })
 
     const slicedItems = hasLimit
         ? rotateArray(items, rotateIndex).slice(0, limit)

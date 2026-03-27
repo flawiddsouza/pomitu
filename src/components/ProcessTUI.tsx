@@ -478,7 +478,7 @@ export function ProcessTUI({ configPath, clearLogs }: ProcessTUIProps) {
                             <Text dimColor>Showing 15 of {items.length} items - scroll with ↑↓ arrows</Text>
                         </Box>
                     )}
-                    <PersistentSelectInput items={items} onSelect={handleMenuSelect} isFocused={!isProcessing && !isReloading && !searchMode} limit={15} />
+                    <PersistentSelectInput items={items} onSelect={handleMenuSelect} isFocused={!isProcessing && !isReloading && !searchMode} limit={15} headingPredicate={item => item.value.startsWith('info:')} />
                 </>
             ) : (
                 <Text>Loading processes...</Text>
