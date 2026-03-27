@@ -357,6 +357,18 @@ export function ProcessTUI({ configPath, clearLogs }: ProcessTUIProps) {
                 openFileInNativeApp(logPath)
                 setIsProcessing(false)
                 return
+            } else if (action === 'opencwd') {
+                try {
+                    await open(app.cwd)
+                    setMessage('Opening working directory...')
+                    setMessageColor('green')
+                } catch (error) {
+                    setMessage(`Failed to open directory: ${error instanceof Error ? error.message : String(error)}`)
+                    setMessageColor('red')
+                }
+                setTimeout(() => setMessage(''), 3000)
+                setIsProcessing(false)
+                return
             }
 
             setProcesses(computeStatuses())
@@ -399,8 +411,12 @@ export function ProcessTUI({ configPath, clearLogs }: ProcessTUIProps) {
                     value: `viewout:${proc.name}`
                 })
                 items.push({
-                    label: '  └─ View Error Log',
+                    label: '  ├─ View Error Log',
                     value: `viewerr:${proc.name}`
+                })
+                items.push({
+                    label: '  └─ Open Working Directory',
+                    value: `opencwd:${proc.name}`
                 })
             } else {
                 items.push({
@@ -412,8 +428,12 @@ export function ProcessTUI({ configPath, clearLogs }: ProcessTUIProps) {
                     value: `viewout:${proc.name}`
                 })
                 items.push({
-                    label: '  └─ View Error Log',
+                    label: '  ├─ View Error Log',
                     value: `viewerr:${proc.name}`
+                })
+                items.push({
+                    label: '  └─ Open Working Directory',
+                    value: `opencwd:${proc.name}`
                 })
             }
         })
