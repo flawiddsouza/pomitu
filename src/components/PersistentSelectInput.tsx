@@ -4,7 +4,7 @@
  */
 import { isDeepStrictEqual } from 'node:util'
 import React, { useState, useEffect, useRef, useCallback } from 'react'
-import { Box, useInput } from 'ink'
+import { Box, useInput, useStdin } from 'ink'
 import { Indicator, Item as ItemComponent } from 'ink-select-input'
 import type { IndicatorProps, ItemProps } from 'ink-select-input'
 import type { FC } from 'react'
@@ -56,6 +56,43 @@ export function PersistentSelectInput<V>({
     )
 
     const previousItems = useRef(items)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { internal_eventEmitter } = useStdin() as any
+
+    useEffect(() => {
+        if (!isFocused || items.length === 0) return
+
+        const handleHomeEnd = (data: Buffer) => {
+            const str = data.toString()
+            const isHome = str === '\x1b[H' || str === '\x1bOH' || str === '\x1b[1~' || str === '\x1b[7~'
+            const isEnd = str === '\x1b[F' || str === '\x1bOF' || str === '\x1b[4~' || str === '\x1b[8~'
+
+            if (isHome) {
+                setSelectedIndex(0)
+                setRotateIndex(0)
+                if (typeof onHighlight === 'function' && items[0]) onHighlight(items[0])
+            }
+
+            if (isEnd) {
+                if (hasLimit) {
+                    const newRotateIndex = -(items.length - limit)
+                    setRotateIndex(newRotateIndex)
+                    setSelectedIndex(limit - 1)
+                    const sliced = rotateArray(items, newRotateIndex).slice(0, limit)
+                    if (typeof onHighlight === 'function' && sliced[limit - 1]) onHighlight(sliced[limit - 1])
+                } else {
+                    const lastIdx = items.length - 1
+                    setSelectedIndex(lastIdx)
+                    if (typeof onHighlight === 'function' && items[lastIdx]) onHighlight(items[lastIdx])
+                }
+            }
+        }
+
+        internal_eventEmitter?.on('input', handleHomeEnd)
+        return () => {
+            internal_eventEmitter?.removeListener('input', handleHomeEnd)
+        }
+    }, [isFocused, items, hasLimit, limit, onHighlight, internal_eventEmitter])
 
     useEffect(() => {
         if (!isDeepStrictEqual(
