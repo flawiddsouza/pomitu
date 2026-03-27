@@ -98,7 +98,7 @@ If you want to contribute to Pomitu or run it in development mode:
 Dev installation test:
 
 ```sh
-npm run build && npm pack && npm install -g pomitu-1.5.0.tgz && rm pomitu-1.5.0.tgz
+npm run build && npm pack && npm install -g pomitu-1.6.0.tgz && rm pomitu-1.6.0.tgz
 ```
 
 ### Linting

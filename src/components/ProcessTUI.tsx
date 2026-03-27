@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import readline from 'node:readline'
 import { existsSync } from 'node:fs'
 import open from 'open'
-import { Box, Text, useApp, useStdin } from 'ink'
+import { Box, Text, useApp, useStdin, useInput } from 'ink'
 import { PersistentSelectInput } from './PersistentSelectInput.js'
 import { ProcessManager, ConfigManager } from '../services/index.js'
 import { getFileNameFriendlyName, getProcessLogOutFilePath, getProcessLogErrorFilePath, getPomituSignalsDirectory } from '../helpers.js'
@@ -31,8 +31,16 @@ export function ProcessTUI({ configPath, clearLogs }: ProcessTUIProps) {
     const [messageColor, setMessageColor] = useState<'green' | 'red' | 'yellow'>('green')
     const [isProcessing, setIsProcessing] = useState(false)
     const [isReloading, setIsReloading] = useState(false)
-    const [searchMode, setSearchMode] = useState(false)
+    const [searchActive, setSearchActive] = useState(false)
     const [searchQuery, setSearchQuery] = useState('')
+    // ESC via Ink's own pipeline — no readline disambiguation delay
+    useInput(useCallback((_input: string, key: { escape: boolean }) => {
+        if (key.escape) {
+            setSearchActive(false)
+            setSearchQuery('')
+        }
+    }, []), { isActive: searchActive })
+
     const previousRawModeRef = useRef(false)
     const rawModeCapturedRef = useRef(false)
     const appsRef = useRef<AppConfig[]>([])
@@ -229,25 +237,21 @@ export function ProcessTUI({ configPath, clearLogs }: ProcessTUIProps) {
         }
 
         const handleKeypress = (str: string | undefined, key: readline.Key | undefined) => {
-            // Handle search mode
-            if (searchMode) {
-                if (key?.name === 'escape') {
-                    setSearchMode(false)
-                    setSearchQuery('')
-                    return
-                }
+            if (key?.ctrl && key.name === 'c') {
+                cleanExit()
+                return
+            }
+
+            if (searchActive) {
                 if (key?.name === 'backspace') {
                     setSearchQuery(prev => prev.slice(0, -1))
                     return
                 }
-                if (key?.name === 'return') {
-                    setSearchMode(false)
-                    return
-                }
-                if (str && str.length === 1 && !key?.ctrl && !key?.meta) {
+                if (key?.name !== 'return' && str && str.length === 1 && !key?.ctrl && !key?.meta) {
                     setSearchQuery(prev => prev + str)
-                    return
                 }
+                // ESC is handled by useInput (Ink pipeline); arrow keys, Enter, and other
+                // navigation are handled by PersistentSelectInput via Ink's input pipeline
                 return
             }
 
@@ -268,18 +272,9 @@ export function ProcessTUI({ configPath, clearLogs }: ProcessTUIProps) {
             }
 
             if (str === '/') {
-                setSearchMode(true)
+                setSearchActive(true)
                 setSearchQuery('')
             }
-
-            if (key?.name === 'escape' && searchQuery) {
-                setSearchQuery('')
-            }
-
-            if (key?.ctrl && key.name === 'c') {
-                cleanExit()
-            }
-
         }
 
         // Use prependListener to capture keys before other handlers
@@ -292,7 +287,7 @@ export function ProcessTUI({ configPath, clearLogs }: ProcessTUIProps) {
                 setRawMode(previousRawModeRef.current)
             }
         }
-    }, [stdin, setRawMode, cleanExit, reloadConfig, searchMode, searchQuery])
+    }, [stdin, setRawMode, cleanExit, reloadConfig, searchActive])
 
     // Handle Ctrl+C signal directly - use prependListener to be first
     useEffect(() => {
@@ -449,8 +444,9 @@ export function ProcessTUI({ configPath, clearLogs }: ProcessTUIProps) {
         return items
     }, [])
 
+    const allItems = useMemo(() => buildMenuItems(processes), [buildMenuItems, processes])
+
     const items = useMemo(() => {
-        const allItems = buildMenuItems(processes)
         if (!searchQuery) return allItems
 
         const query = searchQuery.toLowerCase()
@@ -458,7 +454,7 @@ export function ProcessTUI({ configPath, clearLogs }: ProcessTUIProps) {
             item.label.toLowerCase().includes(query) ||
             item.value.toLowerCase().includes(query)
         )
-    }, [buildMenuItems, processes, searchQuery])
+    }, [allItems, searchQuery])
 
     const handleMenuSelect = useCallback((item: { label: string; value: string }) => {
         if (item.value === 'separator' || item.value.startsWith('info:')) {
@@ -489,24 +485,23 @@ export function ProcessTUI({ configPath, clearLogs }: ProcessTUIProps) {
                     <Box marginBottom={1}>
                         <Text dimColor>Use arrow keys to navigate, Enter to select, '/' to search, 'r' to reload, 'e' to edit config, 'q' or Ctrl+C to quit</Text>
                     </Box>
-                    {searchMode && (
+                    {searchActive && (
                         <Box marginBottom={1}>
                             <Text color="yellow">Search: {searchQuery}</Text>
-                            <Text dimColor> (ESC to cancel, Enter to apply)</Text>
+                            <Text dimColor> (ESC to clear)</Text>
                         </Box>
                     )}
-                    {searchQuery && !searchMode && (
+                    {searchActive && searchQuery && items.length < allItems.length && (
                         <Box marginBottom={1}>
-                            <Text color="green">Filtering: {searchQuery}</Text>
-                            <Text dimColor> (/ to edit, ESC to clear)</Text>
+                            <Text dimColor>Showing {items.length} of {allItems.length} items</Text>
                         </Box>
                     )}
-                    {items.length > 15 && (
+                    {!searchActive && items.length > 15 && (
                         <Box marginBottom={1}>
                             <Text dimColor>Showing 15 of {items.length} items - scroll with ↑↓ arrows</Text>
                         </Box>
                     )}
-                    <PersistentSelectInput items={items} onSelect={handleMenuSelect} isFocused={!isProcessing && !isReloading && !searchMode} limit={15} headingPredicate={item => item.value.startsWith('info:')} />
+                    <PersistentSelectInput items={items} onSelect={handleMenuSelect} isFocused={!isProcessing && !isReloading} limit={15} headingPredicate={item => item.value.startsWith('info:')} />
                 </>
             ) : (
                 <Text>Loading processes...</Text>
