@@ -1,4 +1,5 @@
-import { spawn, ChildProcess } from 'node:child_process'
+import { spawn as crossSpawn } from 'cross-spawn'
+import { ChildProcess, spawn as nodeSpawn } from 'node:child_process'
 import { parse } from 'shell-quote'
 import * as fs from 'node:fs'
 import {
@@ -24,6 +25,23 @@ export interface StartOptions {
 
 export interface StopOptions {
     quiet?: boolean
+}
+
+function killProcess(pid: number): Promise<void> {
+    return new Promise((resolve, reject) => {
+        if (process.platform === 'win32') {
+            const killer = nodeSpawn('taskkill', ['/F', '/T', '/PID', String(pid)])
+            killer.on('close', (code) => code === 0 ? resolve() : reject(new Error(`taskkill exited with ${code}`)))
+            killer.on('error', reject)
+        } else {
+            try {
+                process.kill(pid)
+                resolve()
+            } catch (err) {
+                reject(err)
+            }
+        }
+    })
 }
 
 export class ProcessManager {
@@ -87,7 +105,7 @@ export class ProcessManager {
         }
 
         try {
-            process.kill(pid)
+            await killProcess(pid)
             this.pidManager.removePid(fileNameFriendlyName)
             if (!quiet) {
                 console.log(`${name} with pid ${pid} stopped`)
@@ -129,7 +147,7 @@ export class ProcessManager {
             console.log(`Stopping ${appName} at pid ${existingPid}`)
 
             try {
-                process.kill(existingPid)
+                await killProcess(existingPid)
             } catch (error: unknown) {
                 const err = error as Error
                 console.error(`Error stopping ${appName}: ${err.message}`)
@@ -148,7 +166,7 @@ export class ProcessManager {
         const stderr = fs.openSync(stderrPath, 'a')
 
         return new Promise((resolve, reject) => {
-            const startedProcess = spawn(command[0], command.slice(1), {
+            const startedProcess = crossSpawn(command[0], command.slice(1), {
                 cwd: app.cwd,
                 stdio: ['ignore', stdout, stderr],
                 detached: daemon,
