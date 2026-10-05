@@ -32,6 +32,7 @@ Run in interactive mode with a Terminal User Interface (TUI) that allows you to:
 - View the status of all processes in real-time
 - Start, stop, and restart individual apps
 - Navigate with arrow keys
+- Press `r` to reload the config file
 - Press `q` to quit
 
 The interactive mode is perfect for development when you want to manage multiple processes and see their status at a glance.
@@ -40,6 +41,14 @@ The interactive mode is perfect for development when you want to manage multiple
 
 - `--no-daemon` - Run in interactive TUI mode instead of daemonizing
 - `--clear-logs` - Clear log files before starting the app
+
+### Reload the config
+
+```sh
+pomitu reload
+```
+
+This command makes the running TUI reread its config file, the same as pressing `r` there. Apps removed from the config are stopped, and new apps appear stopped until started. It prints the result and exits with an error if the config is invalid or no TUI is running.
 
 ### Stop an application
 

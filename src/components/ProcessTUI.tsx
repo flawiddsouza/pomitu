@@ -5,10 +5,10 @@ import open from 'open'
 import { Box, Text, useApp, useStdin, useInput } from 'ink'
 import { PersistentSelectInput } from './PersistentSelectInput.js'
 import { ProcessManager, ConfigManager } from '../services/index.js'
-import { getFileNameFriendlyName, getProcessLogOutFilePath, getProcessLogErrorFilePath, getPomituSignalsDirectory } from '../helpers.js'
+import { getFileNameFriendlyName, getProcessLogOutFilePath, getProcessLogErrorFilePath, getPomituSignalsDirectory, getTuiReloadSignalPath } from '../helpers.js'
 import chokidar from 'chokidar'
 import * as path from 'node:path'
-import { writeTuiPresence, clearTuiPresence, readAndClearSignal } from '../services/IpcSignal.js'
+import { writeTuiPresence, clearTuiPresence, readAndClearSignal, readAndClearReloadSignal, writeReloadResult } from '../services/IpcSignal.js'
 import type { AppConfig } from '../services/ConfigManager.js'
 
 interface ProcessTUIProps {
@@ -45,6 +45,7 @@ export function ProcessTUI({ configPath, clearLogs }: ProcessTUIProps) {
     const rawModeCapturedRef = useRef(false)
     const appsRef = useRef<AppConfig[]>([])
     const ipcHandlerRef = useRef<((appName: string, action: string) => void) | null>(null)
+    const reloadConfigRef = useRef<(() => Promise<{ ok: boolean, message: string }>) | null>(null)
 
     // Create managers only once
     const processManager = useMemo(() => new ProcessManager(), [])
@@ -100,13 +101,14 @@ export function ProcessTUI({ configPath, clearLogs }: ProcessTUIProps) {
     }, [apps, processManager])
 
     // Reload config function
-    const reloadConfig = useCallback(async () => {
-        if (isReloading || isProcessing) return
+    const reloadConfig = useCallback(async (): Promise<{ ok: boolean, message: string }> => {
+        if (isReloading || isProcessing) return { ok: false, message: 'Busy with another operation, try again' }
 
         setIsReloading(true)
         setMessage('Reloading configuration...')
         setMessageColor('yellow')
 
+        let result: { ok: boolean, message: string }
         try {
             const config = configManager.readConfig(configPath)
             configManager.validateConfig(config)
@@ -144,23 +146,30 @@ export function ProcessTUI({ configPath, clearLogs }: ProcessTUIProps) {
             setApps(config.apps)
 
             if (stoppedApps.length > 0) {
-                setMessage(`Configuration reloaded. Stopped ${stoppedApps.length} running app(s): ${stoppedApps.join(', ')}`)
+                result = { ok: true, message: `Configuration reloaded. Stopped ${stoppedApps.length} running app(s): ${stoppedApps.join(', ')}` }
             } else if (removedApps.length > 0) {
-                setMessage(`Configuration reloaded. ${removedApps.length} app(s) removed (none were running)`)
+                result = { ok: true, message: `Configuration reloaded. ${removedApps.length} app(s) removed (none were running)` }
             } else {
-                setMessage('Configuration reloaded successfully')
+                result = { ok: true, message: 'Configuration reloaded successfully' }
             }
+            setMessage(result.message)
             setMessageColor('green')
         } catch (error: unknown) {
             const err = error as Error
-            setMessage(`Error reloading config: ${err.message}`)
+            result = { ok: false, message: `Error reloading config: ${err.message}` }
+            setMessage(result.message)
             setMessageColor('red')
         } finally {
             setIsReloading(false)
             // Clear message after 3 seconds
             setTimeout(() => setMessage(''), 3000)
         }
+        return result
     }, [configPath, configManager, isReloading, isProcessing, apps, processes, processManager])
+
+    useEffect(() => {
+        reloadConfigRef.current = reloadConfig
+    }, [reloadConfig])
 
     // Load config on mount
     useEffect(() => {
@@ -200,6 +209,16 @@ export function ProcessTUI({ configPath, clearLogs }: ProcessTUIProps) {
         const watcher = chokidar.watch(signalsDir, { ignoreInitial: true })
 
         const handleSignalFile = (filePath: string) => {
+            if (path.resolve(filePath) === path.resolve(getTuiReloadSignalPath())) {
+                const timestamp = readAndClearReloadSignal()
+                if (timestamp === null || !reloadConfigRef.current) return
+                // A failed write only leaves the CLI to time out; it must not crash the TUI.
+                reloadConfigRef.current()
+                    .then(result => writeReloadResult({ timestamp, ...result }))
+                    .catch(() => {})
+                return
+            }
+            if (path.extname(filePath) !== '.json') return
             const fileBaseName = path.basename(filePath, '.json')
             const matchedApp = appsRef.current.find(a => getFileNameFriendlyName(a.name) === fileBaseName)
             if (!matchedApp) return

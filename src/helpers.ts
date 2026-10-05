@@ -26,6 +26,16 @@ export function getProcessSignalPath(name: string) {
     return path.join(getPomituSignalsDirectory(), `${name}.json`)
 }
 
+// Reload targets the TUI, not one app, so these use an extension no app
+// signal file (<name>.json) can have.
+export function getTuiReloadSignalPath() {
+    return path.join(getPomituSignalsDirectory(), 'tui-reload.signal')
+}
+
+export function getTuiReloadResultPath() {
+    return path.join(getPomituSignalsDirectory(), 'tui-reload.result')
+}
+
 export function getTuiPidPath(name: string) {
     return path.join(getPomituPidsDirectory(), `${name}-tui.pid`)
 }

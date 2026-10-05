@@ -4,6 +4,7 @@ import { start } from './commands/start.js'
 import { flush } from './commands/flush.js'
 import { stop } from './commands/stop.js'
 import { restart } from './commands/restart.js'
+import { reload } from './commands/reload.js'
 import { mkdirSync } from 'node:fs'
 import { ls } from './commands/ls.js'
 import { getPomituDirectory, getPomituLogsDirectory, getPomituPidsDirectory, getPomituSignalsDirectory } from './helpers.js'
@@ -26,5 +27,6 @@ program
     .addCommand(flush)
     .addCommand(stop)
     .addCommand(restart)
+    .addCommand(reload)
     .addCommand(ls)
     .parse()

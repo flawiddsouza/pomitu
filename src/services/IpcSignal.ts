@@ -1,5 +1,6 @@
 import * as fs from 'node:fs'
-import { getProcessSignalPath, getTuiPidPath, getFileNameFriendlyName, pidIsRunning } from '../helpers.js'
+import * as path from 'node:path'
+import { getProcessSignalPath, getTuiPidPath, getFileNameFriendlyName, pidIsRunning, getPomituPidsDirectory, getTuiReloadSignalPath, getTuiReloadResultPath } from '../helpers.js'
 import { PidManager } from './PidManager.js'
 
 export type IpcAction = 'restart' | 'stop' | 'start'
@@ -41,6 +42,73 @@ export function isTuiActive(appName: string): boolean {
     } catch {
         return false
     }
+}
+
+export function isAnyTuiActive(): boolean {
+    const pidsDir = getPomituPidsDirectory()
+    return fs.readdirSync(pidsDir).some(file => {
+        if (!file.endsWith('-tui.pid')) return false
+        try {
+            return Date.now() - fs.statSync(path.join(pidsDir, file)).mtimeMs <= TUI_HEARTBEAT_MAX_AGE_MS
+        } catch {
+            return false
+        }
+    })
+}
+
+export interface ReloadResult {
+    timestamp: number
+    ok: boolean
+    message: string
+}
+
+export function writeReloadSignal(): number {
+    const timestamp = Date.now()
+    fs.rmSync(getTuiReloadResultPath(), { force: true })
+    fs.writeFileSync(getTuiReloadSignalPath(), JSON.stringify({ timestamp }))
+    return timestamp
+}
+
+export function clearReloadSignal(): void {
+    fs.rmSync(getTuiReloadSignalPath(), { force: true })
+}
+
+// Returns the signal's timestamp, which the result echoes back.
+export function readAndClearReloadSignal(): number | null {
+    const signalPath = getTuiReloadSignalPath()
+    if (!fs.existsSync(signalPath)) {
+        return null
+    }
+    try {
+        const raw = fs.readFileSync(signalPath, 'utf-8')
+        fs.unlinkSync(signalPath)
+        const { timestamp } = JSON.parse(raw) as { timestamp: number }
+        return Date.now() - timestamp > SIGNAL_MAX_AGE_MS ? null : timestamp
+    } catch {
+        return null
+    }
+}
+
+export function writeReloadResult(result: ReloadResult): void {
+    fs.writeFileSync(getTuiReloadResultPath(), JSON.stringify(result))
+}
+
+export async function waitForReloadResult(timestamp: number, timeoutMs: number): Promise<ReloadResult | null> {
+    const resultPath = getTuiReloadResultPath()
+    const deadline = Date.now() + timeoutMs
+    while (Date.now() < deadline) {
+        try {
+            const result = JSON.parse(fs.readFileSync(resultPath, 'utf-8')) as ReloadResult
+            if (result.timestamp === timestamp) {
+                fs.rmSync(resultPath, { force: true })
+                return result
+            }
+        } catch {
+            // not written yet
+        }
+        await new Promise(resolve => setTimeout(resolve, WAIT_POLL_INTERVAL_MS))
+    }
+    return null
 }
 
 export function writeSignal(appName: string, action: IpcAction): void {
