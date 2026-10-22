@@ -95,18 +95,28 @@ apps:
   - name: "App 2"
     cwd: "/path/to/app2"
     run: "node server.js"
+    env:
+      PORT: 3000
 ```
+
+`env` sets environment variables for that app.
+
+On Windows, an app gets the environment variables stored in Windows for your account and the system, the same ones a program opened from Explorer gets, plus its `env`. Variables set only in the shell that runs pomitu don't reach it, so an app behaves the same whoever starts it. On Linux and macOS, an app gets the environment of the shell that runs pomitu, plus its `env`.
 
 ## Development
 
 If you want to contribute to Pomitu or run it in development mode:
 
 1. Clone the repository
-2. Install dependencies:
+2. Install dependencies, plus [Go](https://go.dev/dl/) for building the Windows launcher:
    ```sh
    npm install
    ```
-3. Run in development mode:
+3. Build once, since starting apps on Windows needs `dist/launcher.exe`:
+   ```sh
+   npm run build
+   ```
+4. Run in development mode:
    ```sh
    npm run dev
    ```
@@ -135,6 +145,8 @@ To build the project:
 ```sh
 npm run build
 ```
+
+This also builds `launcher/main.go` into `dist/launcher.exe`. On Windows, pomitu starts each app through it, because Node can't start a process that both outlives it and has a hidden console. The launcher starts the app and exits, so it doesn't stay running.
 
 To build and run:
 ```sh

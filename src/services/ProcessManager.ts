@@ -1,8 +1,7 @@
-import { spawn as crossSpawn } from 'cross-spawn'
-import { ChildProcess, spawn as nodeSpawn } from 'node:child_process'
+import crossSpawn from 'cross-spawn'
+import { spawn as nodeSpawn } from 'node:child_process'
 import { parse } from 'shell-quote'
 import * as fs from 'node:fs'
-import * as path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
     getProcessLogOutFilePath,
@@ -12,6 +11,7 @@ import {
 } from '../helpers.js'
 import { PidManager } from './PidManager.js'
 import { LogManager } from './LogManager.js'
+import { getAppEnvironment } from './Environment.js'
 import type { AppConfig, Config } from './ConfigManager.js'
 
 export interface ProcessInfo {
@@ -24,8 +24,20 @@ export interface StartOptions {
     clearLogs?: boolean
 }
 
-// wrapper.ts under tsx, wrapper.js once built
-const wrapperPath = fileURLToPath(new URL(`../wrapper${path.extname(fileURLToPath(import.meta.url))}`, import.meta.url))
+// src/services and dist/services are both two levels below the package root
+const launcherPath = fileURLToPath(new URL('../../dist/launcher.exe', import.meta.url))
+
+// cross-spawn's parsing step, which its types leave out. On Windows it resolves the
+// command on the given PATH, and wraps .cmd and .bat files in cmd.exe with escaping.
+interface ParsedCommand {
+    command: string
+    args: string[]
+    file?: string
+    options: { windowsVerbatimArguments?: boolean }
+}
+const parseCommand = (crossSpawn as unknown as {
+    _parse(command: string, args: string[], options: object): ParsedCommand
+})._parse
 
 function killProcess(pid: number): Promise<void> {
     return new Promise((resolve, reject) => {
@@ -70,9 +82,9 @@ export class ProcessManager {
             this.logManager.clearAppLogs(fileNameFriendAppName)
         }
 
-        const startedProcess = await this.spawnProcess(app, run)
-        this.pidManager.savePid(fileNameFriendAppName, startedProcess.pid!)
-        return startedProcess.pid!
+        const pid = await this.spawnProcess(app, run)
+        this.pidManager.savePid(fileNameFriendAppName, pid)
+        return pid
     }
 
     // Stops the app if running, then starts it. Returns its new pid.
@@ -147,20 +159,25 @@ export class ProcessManager {
         return processes
     }
 
-    private async spawnProcess(app: AppConfig, command: string[]): Promise<ChildProcess> {
+    private async spawnProcess(app: AppConfig, command: string[]): Promise<number> {
         const fileNameFriendAppName = getFileNameFriendlyName(app.name)
-        const stdout = fs.openSync(getProcessLogOutFilePath(fileNameFriendAppName), 'a')
-        const stderr = fs.openSync(getProcessLogErrorFilePath(fileNameFriendAppName), 'a')
-        const options = {
-            cwd: app.cwd,
-            stdio: ['ignore', stdout, stderr] as ['ignore', number, number],
-            detached: true,
+        const env = await getAppEnvironment(app)
+        const stdoutPath = getProcessLogOutFilePath(fileNameFriendAppName)
+        const stderrPath = getProcessLogErrorFilePath(fileNameFriendAppName)
+
+        if (process.platform === 'win32') {
+            return this.launchOnWindows(app, command, env, stdoutPath, stderrPath)
         }
 
+        const stdout = fs.openSync(stdoutPath, 'a')
+        const stderr = fs.openSync(stderrPath, 'a')
         return new Promise((resolve, reject) => {
-            const startedProcess = process.platform === 'win32'
-                ? nodeSpawn(process.execPath, [...process.execArgv, wrapperPath, JSON.stringify({ cwd: app.cwd, command })], options)
-                : crossSpawn(command[0], command.slice(1), options)
+            const startedProcess = crossSpawn(command[0], command.slice(1), {
+                cwd: app.cwd,
+                env,
+                stdio: ['ignore', stdout, stderr],
+                detached: true,
+            })
 
             startedProcess.on('error', (error) => {
                 fs.closeSync(stdout)
@@ -172,8 +189,45 @@ export class ProcessManager {
                 startedProcess.unref()
                 fs.closeSync(stdout)
                 fs.closeSync(stderr)
-                resolve(startedProcess)
+                resolve(startedProcess.pid!)
             })
+        })
+    }
+
+    // Node can't start a process that both outlives it and has a hidden console, so
+    // launcher.exe starts the app and reports its pid
+    private launchOnWindows(app: AppConfig, command: string[], env: NodeJS.ProcessEnv, stdoutPath: string, stderrPath: string): Promise<number> {
+        const parsed = parseCommand(command[0], command.slice(1), { cwd: app.cwd, env })
+        const verbatim = parsed.options.windowsVerbatimArguments === true
+        const request = {
+            // cmd.exe when the command needs it, otherwise the resolved program
+            file: verbatim ? parsed.command : (parsed.file ?? parsed.command),
+            args: [parsed.command, ...parsed.args],
+            verbatim,
+            cwd: app.cwd,
+            env: Object.entries(env).map(([name, value]) => `${name}=${value}`),
+            stdout: stdoutPath,
+            stderr: stderrPath,
+        }
+
+        return new Promise((resolve, reject) => {
+            const launcher = nodeSpawn(launcherPath, [], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true })
+            let output = ''
+            let errorOutput = ''
+            launcher.stdout.on('data', (data) => output += data)
+            launcher.stderr.on('data', (data) => errorOutput += data)
+            launcher.on('error', (error) => reject(new Error(`Error starting ${app.name}: could not run ${launcherPath}: ${error.message}`)))
+            launcher.on('close', (code) => {
+                const pid = Number(output)
+                if (code === 0 && Number.isInteger(pid) && pid > 0) {
+                    resolve(pid)
+                } else {
+                    reject(new Error(`Error starting ${app.name}: ${errorOutput.trim() || `launcher exited with ${code}`}`))
+                }
+            })
+            // If the launcher dies before reading the request, 'close' reports it
+            launcher.stdin.on('error', () => {})
+            launcher.stdin.end(JSON.stringify(request))
         })
     }
 }

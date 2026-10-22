@@ -8,6 +8,7 @@ export interface AppConfig {
     name: string
     cwd: string
     run: string
+    env?: Record<string, string | number | boolean>
 }
 
 export interface Config {
