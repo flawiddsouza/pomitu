@@ -1,6 +1,5 @@
 import { Command } from 'commander'
 import { ProcessManager } from '../services/index.js'
-import { isTuiActive, writeSignal, waitForPidState } from '../services/IpcSignal.js'
 
 export const stop = new Command('stop')
     .description('stop a running app or all apps')
@@ -9,41 +8,31 @@ export const stop = new Command('stop')
         try {
             const processManager = new ProcessManager()
 
+            const names = name === 'all'
+                ? processManager.listRunningProcesses().filter(p => p.isRunning).map(p => p.name)
+                : [name]
+
+            let stoppedCount = 0
+            let failed = false
+            for (const appName of names) {
+                try {
+                    if (await processManager.stopApp(appName)) {
+                        console.log(`Stopped ${appName}`)
+                        stoppedCount++
+                    } else if (name !== 'all') {
+                        console.warn(`${appName} is not running`)
+                    }
+                } catch (error: unknown) {
+                    console.error(`Error stopping ${appName}: ${(error as Error).message}`)
+                    failed = true
+                }
+            }
+
             if (name === 'all') {
-                const runningProcesses = processManager.listRunningProcesses()
-                let stoppedCount = 0
-
-                for (const proc of runningProcesses) {
-                    if (isTuiActive(proc.name)) {
-                        writeSignal(proc.name, 'stop')
-                        const confirmed = await waitForPidState(proc.name, 'absent')
-                        if (confirmed) stoppedCount++
-                    } else {
-                        const success = await processManager.stopApp(proc.name)
-                        if (success) stoppedCount++
-                    }
-                }
-
-                if (stoppedCount === 0) {
-                    console.warn('No running processes found')
-                } else {
-                    console.log(`Stopped ${stoppedCount} process(es)`)
-                }
-            } else {
-                if (isTuiActive(name)) {
-                    writeSignal(name, 'stop')
-                    const confirmed = await waitForPidState(name, 'absent')
-                    if (confirmed) {
-                        console.log(`Stopped ${name}`)
-                    } else {
-                        console.warn(`Stop signal sent but could not confirm ${name} stopped within timeout`)
-                    }
-                } else {
-                    const success = await processManager.stopApp(name)
-                    if (!success) {
-                        console.warn(`No running process found for ${name}`)
-                    }
-                }
+                console.log(stoppedCount === 0 ? 'No running apps found' : `Stopped ${stoppedCount} app(s)`)
+            }
+            if (failed) {
+                process.exit(1)
             }
         } catch (error: unknown) {
             const err = error as Error

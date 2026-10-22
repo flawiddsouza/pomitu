@@ -5,15 +5,11 @@ import open from 'open'
 import { Box, Text, useApp, useStdin, useInput } from 'ink'
 import { PersistentSelectInput } from './PersistentSelectInput.js'
 import { ProcessManager, ConfigManager } from '../services/index.js'
-import { getFileNameFriendlyName, getProcessLogOutFilePath, getProcessLogErrorFilePath, getPomituSignalsDirectory, getTuiReloadSignalPath } from '../helpers.js'
-import chokidar from 'chokidar'
-import * as path from 'node:path'
-import { writeTuiPresence, clearTuiPresence, readAndClearSignal, readAndClearReloadSignal, writeReloadResult } from '../services/IpcSignal.js'
+import { getFileNameFriendlyName, getProcessLogOutFilePath, getProcessLogErrorFilePath } from '../helpers.js'
 import type { AppConfig } from '../services/ConfigManager.js'
 
 interface ProcessTUIProps {
     configPath: string
-    clearLogs?: boolean
 }
 
 interface ProcessStatus {
@@ -22,7 +18,7 @@ interface ProcessStatus {
     isRunning: boolean
 }
 
-export function ProcessTUI({ configPath, clearLogs }: ProcessTUIProps) {
+export function ProcessTUI({ configPath }: ProcessTUIProps) {
     const { exit } = useApp()
     const { stdin, setRawMode } = useStdin()
     const [processes, setProcesses] = useState<ProcessStatus[]>([])
@@ -30,7 +26,6 @@ export function ProcessTUI({ configPath, clearLogs }: ProcessTUIProps) {
     const [message, setMessage] = useState<string>('')
     const [messageColor, setMessageColor] = useState<'green' | 'red' | 'yellow'>('green')
     const [isProcessing, setIsProcessing] = useState(false)
-    const [isReloading, setIsReloading] = useState(false)
     const [searchActive, setSearchActive] = useState(false)
     const [searchQuery, setSearchQuery] = useState('')
     // ESC via Ink's own pipeline — no readline disambiguation delay
@@ -43,9 +38,6 @@ export function ProcessTUI({ configPath, clearLogs }: ProcessTUIProps) {
 
     const previousRawModeRef = useRef(false)
     const rawModeCapturedRef = useRef(false)
-    const appsRef = useRef<AppConfig[]>([])
-    const ipcHandlerRef = useRef<((appName: string, action: string) => void) | null>(null)
-    const reloadConfigRef = useRef<(() => Promise<{ ok: boolean, message: string }>) | null>(null)
 
     // Create managers only once
     const processManager = useMemo(() => new ProcessManager(), [])
@@ -72,7 +64,6 @@ export function ProcessTUI({ configPath, clearLogs }: ProcessTUIProps) {
     }, [])
 
     const cleanExit = useCallback(() => {
-        appsRef.current.forEach(app => clearTuiPresence(app.name))
         if (setRawMode) {
             setRawMode(previousRawModeRef.current)
         }
@@ -100,83 +91,32 @@ export function ProcessTUI({ configPath, clearLogs }: ProcessTUIProps) {
         })
     }, [apps, processManager])
 
-    // Reload config function
-    const reloadConfig = useCallback(async (): Promise<{ ok: boolean, message: string }> => {
-        if (isReloading || isProcessing) return { ok: false, message: 'Busy with another operation, try again' }
-
-        setIsReloading(true)
-        setMessage('Reloading configuration...')
-        setMessageColor('yellow')
-
-        let result: { ok: boolean, message: string }
+    // Same as `pomitu reload`
+    const reloadConfig = useCallback(async () => {
+        if (isProcessing) return
+        setIsProcessing(true)
         try {
-            const config = configManager.readConfig(configPath)
-            configManager.validateConfig(config)
-
-            // Check for removed apps and stop them if running
-            const oldAppNames = new Set(apps.map(app => app.name))
-            const newAppNames = new Set(config.apps.map(app => app.name))
-
-            const removedApps = Array.from(oldAppNames).filter(name => !newAppNames.has(name))
-
-            const stoppedApps: string[] = []
-            if (removedApps.length > 0) {
-                // Check which removed apps are actually running
-                const currentProcesses = processes.filter(p =>
-                    removedApps.includes(p.name) && p.isRunning
-                )
-
-                if (currentProcesses.length > 0) {
-                    setMessage(`Stopping removed apps: ${currentProcesses.map(p => p.name).join(', ')}...`)
-
-                    for (const proc of currentProcesses) {
-                        try {
-                            const success = await processManager.stopApp(proc.name, { quiet: true })
-                            if (success) {
-                                stoppedApps.push(proc.name)
-                            }
-                        } catch (error: unknown) {
-                            // Continue even if stop fails
-                            console.error(`Failed to stop ${proc.name}:`, error)
-                        }
-                    }
-                }
-            }
-
+            const config = configManager.loadConfig(configPath)
             setApps(config.apps)
-
-            if (stoppedApps.length > 0) {
-                result = { ok: true, message: `Configuration reloaded. Stopped ${stoppedApps.length} running app(s): ${stoppedApps.join(', ')}` }
-            } else if (removedApps.length > 0) {
-                result = { ok: true, message: `Configuration reloaded. ${removedApps.length} app(s) removed (none were running)` }
-            } else {
-                result = { ok: true, message: 'Configuration reloaded successfully' }
-            }
-            setMessage(result.message)
+            const stoppedApps = await processManager.stopAppsNotIn(config)
+            setMessage(stoppedApps.length > 0
+                ? `Config reloaded. Stopped ${stoppedApps.length} app(s) no longer in it: ${stoppedApps.join(', ')}`
+                : 'Config reloaded')
             setMessageColor('green')
         } catch (error: unknown) {
             const err = error as Error
-            result = { ok: false, message: `Error reloading config: ${err.message}` }
-            setMessage(result.message)
+            setMessage(`Error reloading config: ${err.message}`)
             setMessageColor('red')
         } finally {
-            setIsReloading(false)
-            // Clear message after 3 seconds
-            setTimeout(() => setMessage(''), 3000)
+            setIsProcessing(false)
         }
-        return result
-    }, [configPath, configManager, isReloading, isProcessing, apps, processes, processManager])
-
-    useEffect(() => {
-        reloadConfigRef.current = reloadConfig
-    }, [reloadConfig])
+        setTimeout(() => setMessage(''), 3000)
+    }, [configPath, configManager, processManager, isProcessing])
 
     // Load config on mount
     useEffect(() => {
         try {
-            const config = configManager.readConfig(configPath)
-            configManager.validateConfig(config)
-            setApps(config.apps)
+            setApps(configManager.loadConfig(configPath).apps)
         } catch (error: unknown) {
             const err = error as Error
             setMessage(`Error loading config: ${err.message}`)
@@ -184,58 +124,16 @@ export function ProcessTUI({ configPath, clearLogs }: ProcessTUIProps) {
         }
     }, [configPath, configManager])
 
-    // Update process status
+    // Poll process status, since apps can also be started and stopped from the command line
     useEffect(() => {
-        setProcesses(computeStatuses())
-    }, [computeStatuses])
-
-    // Sync appsRef and write TUI presence files whenever apps change
-    useEffect(() => {
-        appsRef.current = apps
-        apps.forEach(app => writeTuiPresence(app.name))
-    }, [apps])
-
-    // Heartbeat: refresh TUI presence file mtimes so isTuiActive can detect stale files
-    useEffect(() => {
-        const interval = setInterval(() => {
-            appsRef.current.forEach(app => writeTuiPresence(app.name))
-        }, 10000)
+        const update = () => {
+            const next = computeStatuses()
+            setProcesses(prev => JSON.stringify(prev) === JSON.stringify(next) ? prev : next)
+        }
+        update()
+        const interval = setInterval(update, 1000)
         return () => clearInterval(interval)
-    }, [])
-
-    // Set up chokidar watcher for IPC signals (mounted once; uses refs for latest state)
-    useEffect(() => {
-        const signalsDir = getPomituSignalsDirectory()
-        const watcher = chokidar.watch(signalsDir, { ignoreInitial: true })
-
-        const handleSignalFile = (filePath: string) => {
-            if (path.resolve(filePath) === path.resolve(getTuiReloadSignalPath())) {
-                const timestamp = readAndClearReloadSignal()
-                if (timestamp === null || !reloadConfigRef.current) return
-                // A failed write only leaves the CLI to time out; it must not crash the TUI.
-                reloadConfigRef.current()
-                    .then(result => writeReloadResult({ timestamp, ...result }))
-                    .catch(() => {})
-                return
-            }
-            if (path.extname(filePath) !== '.json') return
-            const fileBaseName = path.basename(filePath, '.json')
-            const matchedApp = appsRef.current.find(a => getFileNameFriendlyName(a.name) === fileBaseName)
-            if (!matchedApp) return
-            const action = readAndClearSignal(matchedApp.name)
-            if (!action) return
-            if (ipcHandlerRef.current) {
-                ipcHandlerRef.current(matchedApp.name, action)
-            }
-        }
-
-        watcher.on('add', handleSignalFile)
-        watcher.on('change', handleSignalFile)
-
-        return () => {
-            watcher.close()
-        }
-    }, [])
+    }, [computeStatuses])
 
     // Handle keyboard input - use keypress events to intercept BEFORE SelectInput
     useEffect(() => {
@@ -323,7 +221,7 @@ export function ProcessTUI({ configPath, clearLogs }: ProcessTUIProps) {
     }, [cleanExit])
 
     const handleSelect = useCallback(async (item: { label: string; value: string }) => {
-        if (isProcessing || isReloading) return // Prevent multiple simultaneous operations
+        if (isProcessing) return // Prevent multiple simultaneous operations
 
         const colonIndex = item.value.indexOf(':')
         const action = item.value.slice(0, colonIndex)
@@ -340,31 +238,20 @@ export function ProcessTUI({ configPath, clearLogs }: ProcessTUIProps) {
 
         try {
             if (action === 'start') {
-                await processManager.startApp(app, {
-                    daemon: false,
-                    clearLogs: clearLogs ?? false
-                })
+                await processManager.startApp(app)
                 setMessage(`Started ${appName}`)
                 setMessageColor('green')
             } else if (action === 'stop') {
-                const success = await processManager.stopApp(appName, { quiet: true })
+                const success = await processManager.stopApp(appName)
                 if (success) {
                     setMessage(`Stopped ${appName}`)
                     setMessageColor('green')
                 } else {
-                    setMessage(`Failed to stop ${appName}`)
-                    setMessageColor('red')
+                    setMessage(`${appName} is not running`)
+                    setMessageColor('yellow')
                 }
             } else if (action === 'restart') {
-                const wasRunning = await processManager.stopApp(appName, { quiet: true })
-                if (wasRunning) {
-                    // Wait a bit before restarting
-                    await new Promise(resolve => setTimeout(resolve, 500))
-                }
-                await processManager.startApp(app, {
-                    daemon: false,
-                    clearLogs: clearLogs ?? false
-                })
+                await processManager.restartApp(app)
                 setMessage(`Restarted ${appName}`)
                 setMessageColor('green')
             } else if (action === 'viewout') {
@@ -404,7 +291,7 @@ export function ProcessTUI({ configPath, clearLogs }: ProcessTUIProps) {
 
         // Clear message after 3 seconds
         setTimeout(() => setMessage(''), 3000)
-    }, [apps, clearLogs, computeStatuses, processManager, isProcessing, isReloading])
+    }, [apps, computeStatuses, processManager, isProcessing])
 
     const buildMenuItems = useCallback((statuses: ProcessStatus[]) => {
         const items: Array<{ label: string; value: string }> = []
@@ -483,26 +370,19 @@ export function ProcessTUI({ configPath, clearLogs }: ProcessTUIProps) {
         }
     }, [handleSelect])
 
-    // Keep IPC signal handler up to date with current handleSelect
-    useEffect(() => {
-        ipcHandlerRef.current = (appName: string, action: string) => {
-            handleSelect({ label: '', value: `${action}:${appName}` })
-        }
-    }, [handleSelect])
-
-    const notificationText = isProcessing ? 'Processing...' : (isReloading ? 'Reloading...' : message)
-    const notificationColor = (isProcessing || isReloading) ? 'yellow' : message ? messageColor : undefined
+    const notificationText = isProcessing ? 'Processing...' : message
+    const notificationColor = isProcessing ? 'yellow' : message ? messageColor : undefined
 
     return (
         <Box flexDirection="column">
             <Box borderStyle="round" borderColor="cyan" padding={1} marginBottom={1}>
-                <Text bold color="cyan">Pomitu Process Manager - Interactive Mode</Text>
+                <Text bold color="cyan">Pomitu Process Manager</Text>
             </Box>
 
             {processes.length > 0 ? (
                 <>
                     <Box marginBottom={1}>
-                        <Text dimColor>Use arrow keys to navigate, Enter to select, '/' to search, 'r' to reload, 'e' to edit config, 'q' or Ctrl+C to quit</Text>
+                        <Text dimColor>Use arrow keys to navigate, Enter to select, '/' to search, 'r' to reload, 'e' to edit config, 'q' or Ctrl+C to quit. Apps keep running after you quit</Text>
                     </Box>
                     {searchActive && (
                         <Box marginBottom={1}>
@@ -520,7 +400,7 @@ export function ProcessTUI({ configPath, clearLogs }: ProcessTUIProps) {
                             <Text dimColor>Showing 15 of {items.length} items - scroll with ↑↓ arrows</Text>
                         </Box>
                     )}
-                    <PersistentSelectInput items={items} onSelect={handleMenuSelect} isFocused={!isProcessing && !isReloading} limit={15} headingPredicate={item => item.value.startsWith('info:')} />
+                    <PersistentSelectInput items={items} onSelect={handleMenuSelect} isFocused={!isProcessing} limit={15} headingPredicate={item => item.value.startsWith('info:')} />
                 </>
             ) : (
                 <Text>Loading processes...</Text>

@@ -5,15 +5,15 @@ import { flush } from './commands/flush.js'
 import { stop } from './commands/stop.js'
 import { restart } from './commands/restart.js'
 import { reload } from './commands/reload.js'
+import { tui } from './commands/tui.js'
 import { mkdirSync } from 'node:fs'
 import { ls } from './commands/ls.js'
-import { getPomituDirectory, getPomituLogsDirectory, getPomituPidsDirectory, getPomituSignalsDirectory } from './helpers.js'
+import { getPomituDirectory, getPomituLogsDirectory, getPomituPidsDirectory } from './helpers.js'
 
 function init() {
     mkdirSync(getPomituDirectory(), { recursive: true })
     mkdirSync(getPomituLogsDirectory(), { recursive: true })
     mkdirSync(getPomituPidsDirectory(), { recursive: true })
-    mkdirSync(getPomituSignalsDirectory(), { recursive: true })
 }
 
 init()
@@ -28,5 +28,6 @@ program
     .addCommand(stop)
     .addCommand(restart)
     .addCommand(reload)
+    .addCommand(tui)
     .addCommand(ls)
     .parse()

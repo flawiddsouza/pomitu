@@ -2,6 +2,8 @@ import { spawn as crossSpawn } from 'cross-spawn'
 import { ChildProcess, spawn as nodeSpawn } from 'node:child_process'
 import { parse } from 'shell-quote'
 import * as fs from 'node:fs'
+import * as path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import {
     getProcessLogOutFilePath,
     getProcessLogErrorFilePath,
@@ -10,7 +12,7 @@ import {
 } from '../helpers.js'
 import { PidManager } from './PidManager.js'
 import { LogManager } from './LogManager.js'
-import type { AppConfig } from './ConfigManager.js'
+import type { AppConfig, Config } from './ConfigManager.js'
 
 export interface ProcessInfo {
     name: string
@@ -19,13 +21,11 @@ export interface ProcessInfo {
 }
 
 export interface StartOptions {
-    daemon?: boolean
     clearLogs?: boolean
 }
 
-export interface StopOptions {
-    quiet?: boolean
-}
+// wrapper.ts under tsx, wrapper.js once built
+const wrapperPath = fileURLToPath(new URL(`../wrapper${path.extname(fileURLToPath(import.meta.url))}`, import.meta.url))
 
 function killProcess(pid: number): Promise<void> {
     return new Promise((resolve, reject) => {
@@ -48,11 +48,11 @@ export class ProcessManager {
     private pidManager = new PidManager()
     private logManager = new LogManager()
 
-    async startApp(app: AppConfig, options: StartOptions = {}): Promise<void> {
-        const isDaemon = options.daemon ?? true
-
-        if (isDaemon) {
-            console.log(`Starting: ${app.name} (${app.cwd})`)
+    // Starts the app in the background, where it keeps running after pomitu exits.
+    // Returns its pid.
+    async startApp(app: AppConfig, options: StartOptions = {}): Promise<number> {
+        if (this.getRunningPid(app.name) !== null) {
+            throw new Error(`${app.name} is already running`)
         }
 
         if (!fs.existsSync(app.cwd)) {
@@ -66,56 +66,65 @@ export class ProcessManager {
 
         const fileNameFriendAppName = getFileNameFriendlyName(app.name)
 
-        // Check if process is already running and stop it
-        await this.stopIfRunning(app.name)
-
-        // Clear logs if requested
         if (options.clearLogs) {
             this.logManager.clearAppLogs(fileNameFriendAppName)
         }
 
-        // Start the process
-        const process = await this.spawnProcess(app, run, options.daemon ?? true)
-
-        // Save PID
-        this.pidManager.savePid(fileNameFriendAppName, process.pid!)
-
-        if (isDaemon) {
-            console.log(`Started: ${app.name} with pid ${process.pid}`)
-        }
+        const startedProcess = await this.spawnProcess(app, run)
+        this.pidManager.savePid(fileNameFriendAppName, startedProcess.pid!)
+        return startedProcess.pid!
     }
 
-    async stopApp(name: string, options: StopOptions = {}): Promise<boolean> {
-        const quiet = options.quiet ?? false
+    // Stops the app if running, then starts it. Returns its new pid.
+    async restartApp(app: AppConfig): Promise<number> {
+        if (await this.stopApp(app.name)) {
+            // Give the stopped app a moment to release ports and files
+            await new Promise(resolve => setTimeout(resolve, 500))
+        }
+        return this.startApp(app)
+    }
+
+    // Returns whether a running app was stopped
+    async stopApp(name: string): Promise<boolean> {
         const fileNameFriendlyName = getFileNameFriendlyName(name)
-        const pid = this.pidManager.getPid(fileNameFriendlyName)
+        const pid = this.getRunningPid(name)
 
-        if (!pid) {
-            return false
-        }
-
-        if (!pidIsRunning(pid)) {
-            console.warn(`${name} with pid ${pid} is not running`)
+        if (pid === null) {
             this.pidManager.removePid(fileNameFriendlyName)
             return false
         }
 
-        if (!quiet) {
-            console.log(`Stopping ${name} with pid ${pid}`)
-        }
+        await killProcess(pid)
+        this.pidManager.removePid(fileNameFriendlyName)
+        return true
+    }
 
-        try {
-            await killProcess(pid)
-            this.pidManager.removePid(fileNameFriendlyName)
-            if (!quiet) {
-                console.log(`${name} with pid ${pid} stopped`)
+    // Stops running apps that are not in the config. Returns their names.
+    // One app failing to stop doesn't keep the others running.
+    async stopAppsNotIn(config: Config): Promise<string[]> {
+        const configNames = new Set(config.apps.map(app => getFileNameFriendlyName(app.name)))
+        const stoppedApps: string[] = []
+        const failures: string[] = []
+        for (const proc of this.listRunningProcesses()) {
+            if (!proc.isRunning || configNames.has(proc.name)) continue
+            try {
+                if (await this.stopApp(proc.name)) {
+                    stoppedApps.push(proc.name)
+                }
+            } catch (error: unknown) {
+                failures.push(`${proc.name} (${(error as Error).message})`)
             }
-            return true
-        } catch (error: unknown) {
-            const err = error as Error
-            console.error(`Error stopping ${name} with pid ${pid}: ${err.message}`)
-            return false
         }
+        if (failures.length > 0) {
+            const stopped = stoppedApps.length > 0 ? `. Stopped: ${stoppedApps.join(', ')}` : ''
+            throw new Error(`Could not stop apps no longer in the config: ${failures.join(', ')}${stopped}`)
+        }
+        return stoppedApps
+    }
+
+    getRunningPid(name: string): number | null {
+        const pid = this.pidManager.getPid(getFileNameFriendlyName(name))
+        return pid !== null && pidIsRunning(pid) ? pid : null
     }
 
     listRunningProcesses(): ProcessInfo[] {
@@ -138,48 +147,31 @@ export class ProcessManager {
         return processes
     }
 
-    private async stopIfRunning(appName: string): Promise<void> {
-        const fileNameFriendAppName = getFileNameFriendlyName(appName)
-        const existingPid = this.pidManager.getPid(fileNameFriendAppName)
-
-        if (existingPid && pidIsRunning(existingPid)) {
-            console.warn(`Process ${appName} is already running with pid ${existingPid}`)
-            console.log(`Stopping ${appName} at pid ${existingPid}`)
-
-            try {
-                await killProcess(existingPid)
-            } catch (error: unknown) {
-                const err = error as Error
-                console.error(`Error stopping ${appName}: ${err.message}`)
-            }
+    private async spawnProcess(app: AppConfig, command: string[]): Promise<ChildProcess> {
+        const fileNameFriendAppName = getFileNameFriendlyName(app.name)
+        const stdout = fs.openSync(getProcessLogOutFilePath(fileNameFriendAppName), 'a')
+        const stderr = fs.openSync(getProcessLogErrorFilePath(fileNameFriendAppName), 'a')
+        const options = {
+            cwd: app.cwd,
+            stdio: ['ignore', stdout, stderr] as ['ignore', number, number],
+            detached: true,
         }
 
-        this.pidManager.removePid(fileNameFriendAppName)
-    }
-
-    private async spawnProcess(app: AppConfig, command: string[], daemon: boolean): Promise<ChildProcess> {
-        const fileNameFriendAppName = getFileNameFriendlyName(app.name)
-        const stdoutPath = getProcessLogOutFilePath(fileNameFriendAppName)
-        const stderrPath = getProcessLogErrorFilePath(fileNameFriendAppName)
-
-        const stdout = fs.openSync(stdoutPath, 'a')
-        const stderr = fs.openSync(stderrPath, 'a')
-
         return new Promise((resolve, reject) => {
-            const startedProcess = crossSpawn(command[0], command.slice(1), {
-                cwd: app.cwd,
-                stdio: ['ignore', stdout, stderr],
-                detached: daemon,
-            })
+            const startedProcess = process.platform === 'win32'
+                ? nodeSpawn(process.execPath, [...process.execArgv, wrapperPath, JSON.stringify({ cwd: app.cwd, command })], options)
+                : crossSpawn(command[0], command.slice(1), options)
 
             startedProcess.on('error', (error) => {
+                fs.closeSync(stdout)
+                fs.closeSync(stderr)
                 reject(new Error(`Error starting ${app.name}: ${error.message}`))
             })
 
             startedProcess.on('spawn', () => {
-                if (daemon) {
-                    startedProcess.unref()
-                }
+                startedProcess.unref()
+                fs.closeSync(stdout)
+                fs.closeSync(stderr)
                 resolve(startedProcess)
             })
         })

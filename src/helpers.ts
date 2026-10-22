@@ -18,26 +18,9 @@ export function getFileNameFriendlyName(name: string) {
     return name.replaceAll(' ', '-').toLowerCase()
 }
 
-export function getPomituSignalsDirectory() {
-    return path.join(getPomituDirectory(), 'signals')
-}
-
-export function getProcessSignalPath(name: string) {
-    return path.join(getPomituSignalsDirectory(), `${name}.json`)
-}
-
-// Reload targets the TUI, not one app, so these use an extension no app
-// signal file (<name>.json) can have.
-export function getTuiReloadSignalPath() {
-    return path.join(getPomituSignalsDirectory(), 'tui-reload.signal')
-}
-
-export function getTuiReloadResultPath() {
-    return path.join(getPomituSignalsDirectory(), 'tui-reload.result')
-}
-
-export function getTuiPidPath(name: string) {
-    return path.join(getPomituPidsDirectory(), `${name}-tui.pid`)
+// Holds the path of the config pomitu works with, set by `pomitu start <config>`
+export function getRememberedConfigPathFile() {
+    return path.join(getPomituDirectory(), 'config-path')
 }
 
 export function getProcessLogOutFilePath(name: string) {

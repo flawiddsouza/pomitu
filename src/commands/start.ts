@@ -1,64 +1,42 @@
 import { Command } from 'commander'
 import { ProcessManager, ConfigManager } from '../services/index.js'
-import { isTuiActive, writeSignal, waitForPidState } from '../services/IpcSignal.js'
-import { PidManager } from '../services/PidManager.js'
-import { getFileNameFriendlyName, pidIsRunning } from '../helpers.js'
-import React from 'react'
-import { render } from 'ink'
-import { ProcessTUI } from '../components/ProcessTUI.js'
 
 export const start = new Command('start')
-    .description('start and daemonize an app')
-    .argument('<name>', '[name|namespace|file|ecosystem|id...]')
-    .option('--no-daemon', 'do not daemonize the app and show interactive TUI')
-    .option('--clear-logs', 'clear log files before starting the app')
-    .action(async (name, options) => {
+    .description('start every app in a config in the background, skipping apps already running. Other commands then use this config')
+    .argument('<config>', 'path to the config file')
+    .option('--clear-logs', 'clear log files of the apps it starts')
+    .action(async (configPath, options) => {
         try {
             const configManager = new ConfigManager()
             const processManager = new ProcessManager()
 
-            const config = configManager.readConfig(name)
-            configManager.validateConfig(config)
+            const config = configManager.loadConfig(configPath)
 
-            const runInteractive = options.daemon === false
-            let anyTuiActive = false
-            const pidManager = new PidManager()
+            // Pomitu works with one config at a time
+            const rememberedConfigPath = configManager.getRememberedConfigPath()
+            if (rememberedConfigPath && !configManager.isRememberedConfigPath(configPath)
+                && processManager.listRunningProcesses().some(p => p.isRunning)) {
+                throw new Error(`Apps from ${rememberedConfigPath} are still running. Run pomitu stop all first`)
+            }
+            configManager.rememberConfigPath(configPath)
 
+            let failed = false
             for (const app of config.apps) {
-                if (isTuiActive(app.name)) {
-                    anyTuiActive = true
-                    const existingPid = pidManager.getPid(getFileNameFriendlyName(app.name))
-                    const wasRunning = existingPid !== null && pidIsRunning(existingPid)
-                    writeSignal(app.name, 'start')
-                    if (!runInteractive) {
-                        if (wasRunning) {
-                            await waitForPidState(app.name, 'absent', 3000)
-                        }
-                        const confirmed = await waitForPidState(app.name, 'present', 3000)
-                        if (confirmed) {
-                            const pid = pidManager.getPid(getFileNameFriendlyName(app.name))
-                            console.log(`Started ${app.name} with pid ${pid}`)
-                        } else {
-                            console.warn(`Start signal sent but could not confirm ${app.name} started within timeout`)
-                        }
-                    }
-                } else {
-                    processManager.startApp(app, {
-                        daemon: options.daemon,
-                        clearLogs: options.clearLogs
-                    })
+                const runningPid = processManager.getRunningPid(app.name)
+                if (runningPid !== null) {
+                    console.log(`${app.name} is already running with pid ${runningPid}`)
+                    continue
+                }
+                try {
+                    const pid = await processManager.startApp(app, { clearLogs: options.clearLogs })
+                    console.log(`Started ${app.name} with pid ${pid}`)
+                } catch (error: unknown) {
+                    console.error(`Error starting ${app.name}: ${(error as Error).message}`)
+                    failed = true
                 }
             }
-
-            if (runInteractive && anyTuiActive) {
-                console.log('A TUI session is already running in another terminal — not opening a new one')
-            }
-
-            if (runInteractive && !anyTuiActive) {
-                render(React.createElement(ProcessTUI, {
-                    configPath: name,
-                    clearLogs: options.clearLogs
-                }))
+            if (failed) {
+                process.exit(1)
             }
         } catch (error: unknown) {
             const err = error as Error

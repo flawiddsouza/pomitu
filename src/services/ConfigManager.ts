@@ -1,6 +1,8 @@
 import * as fs from 'node:fs'
+import * as path from 'node:path'
 import * as YAML from 'yaml'
 import { configSchema } from '../schema.js'
+import { getRememberedConfigPathFile, getFileNameFriendlyName } from '../helpers.js'
 
 export interface AppConfig {
     name: string
@@ -13,6 +15,47 @@ export interface Config {
 }
 
 export class ConfigManager {
+    getRememberedConfigPath(): string | null {
+        const file = getRememberedConfigPathFile()
+        return fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null
+    }
+
+    // For commands that act on the config `pomitu start` was given
+    requireRememberedConfigPath(): string {
+        const configPath = this.getRememberedConfigPath()
+        if (!configPath) {
+            throw new Error('No config yet. Run pomitu start <config> first')
+        }
+        return configPath
+    }
+
+    rememberConfigPath(configPath: string): void {
+        fs.writeFileSync(getRememberedConfigPathFile(), path.resolve(configPath))
+    }
+
+    isRememberedConfigPath(configPath: string): boolean {
+        const rememberedConfigPath = this.getRememberedConfigPath()
+        if (!rememberedConfigPath) {
+            return false
+        }
+        const normalize = (p: string) => process.platform === 'win32' ? path.resolve(p).toLowerCase() : path.resolve(p)
+        return normalize(rememberedConfigPath) === normalize(configPath)
+    }
+
+    loadConfig(configPath: string): Config {
+        const config = this.readConfig(configPath)
+        this.validateConfig(config)
+        return config
+    }
+
+    findApp(config: Config, name: string): AppConfig {
+        const app = config.apps.find(a => getFileNameFriendlyName(a.name) === getFileNameFriendlyName(name))
+        if (!app) {
+            throw new Error(`No app named ${name} in the config`)
+        }
+        return app
+    }
+
     readConfig(configFilePath: string): Config {
         if (!fs.existsSync(configFilePath)) {
             throw new Error(`Config file not found: ${configFilePath}`)
