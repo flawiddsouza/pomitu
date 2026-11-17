@@ -24,8 +24,12 @@ export interface StartOptions {
     clearLogs?: boolean
 }
 
-// src/services and dist/services are both two levels below the package root
-const launcherPath = fileURLToPath(new URL('../../dist/launcher.exe', import.meta.url))
+// src/services and dist/services are both two levels below the package root.
+// scripts/build-launcher.ts lists the platforms it is built for.
+const launcherPath = fileURLToPath(new URL(
+    `../../dist/launcher/${process.platform}-${process.arch}/pomitu-runner${process.platform === 'win32' ? '.exe' : ''}`,
+    import.meta.url,
+))
 
 // cross-spawn's parsing step, which its types leave out. On Windows it resolves the
 // command on the given PATH, and wraps .cmd and .bat files in cmd.exe with escaping.
@@ -47,7 +51,8 @@ function killProcess(pid: number): Promise<void> {
             killer.on('error', reject)
         } else {
             try {
-                process.kill(pid)
+                // The launcher's logger leads a process group that the app is in
+                process.kill(-pid)
                 resolve()
             } catch (err) {
                 reject(err)
@@ -106,6 +111,13 @@ export class ProcessManager {
             return false
         }
 
+        // On Windows the kill ends the logger before it can say why the app exited.
+        // On Linux and macOS the logger still writes how the app exited, after this.
+        try {
+            this.logManager.writeEvent(fileNameFriendlyName, 'stopping')
+        } catch {
+            // A log line pomitu can't write is no reason to keep the app running
+        }
         await killProcess(pid)
         this.pidManager.removePid(fileNameFriendlyName)
         return true
@@ -165,51 +177,42 @@ export class ProcessManager {
         const stdoutPath = getProcessLogOutFilePath(fileNameFriendAppName)
         const stderrPath = getProcessLogErrorFilePath(fileNameFriendAppName)
 
+        // The launcher looks the program up itself on Linux and macOS
+        let program = { file: command[0], args: command, verbatim: false }
         if (process.platform === 'win32') {
-            return this.launchOnWindows(app, command, env, stdoutPath, stderrPath)
+            const parsed = parseCommand(command[0], command.slice(1), { cwd: app.cwd, env })
+            const verbatim = parsed.options.windowsVerbatimArguments === true
+            program = {
+                // cmd.exe when the command needs it, otherwise the resolved program
+                file: verbatim ? parsed.command : (parsed.file ?? parsed.command),
+                args: [parsed.command, ...parsed.args],
+                verbatim,
+            }
         }
-
-        const stdout = fs.openSync(stdoutPath, 'a')
-        const stderr = fs.openSync(stderrPath, 'a')
-        return new Promise((resolve, reject) => {
-            const startedProcess = crossSpawn(command[0], command.slice(1), {
-                cwd: app.cwd,
-                env,
-                stdio: ['ignore', stdout, stderr],
-                detached: true,
-            })
-
-            startedProcess.on('error', (error) => {
-                fs.closeSync(stdout)
-                fs.closeSync(stderr)
-                reject(new Error(`Error starting ${app.name}: ${error.message}`))
-            })
-
-            startedProcess.on('spawn', () => {
-                startedProcess.unref()
-                fs.closeSync(stdout)
-                fs.closeSync(stderr)
-                resolve(startedProcess.pid!)
-            })
-        })
-    }
-
-    // Node can't start a process that both outlives it and has a hidden console, so
-    // launcher.exe starts the app and reports its pid
-    private launchOnWindows(app: AppConfig, command: string[], env: NodeJS.ProcessEnv, stdoutPath: string, stderrPath: string): Promise<number> {
-        const parsed = parseCommand(command[0], command.slice(1), { cwd: app.cwd, env })
-        const verbatim = parsed.options.windowsVerbatimArguments === true
-        const request = {
-            // cmd.exe when the command needs it, otherwise the resolved program
-            file: verbatim ? parsed.command : (parsed.file ?? parsed.command),
-            args: [parsed.command, ...parsed.args],
-            verbatim,
+        return this.launch(app, {
+            ...program,
             cwd: app.cwd,
             env: Object.entries(env).map(([name, value]) => `${name}=${value}`),
             stdout: stdoutPath,
             stderr: stderrPath,
-        }
+        })
+    }
 
+    // The launcher starts the app under a logger that puts the time on each log
+    // line, and reports the logger's pid. It is needed on Windows anyway, since Node
+    // can't start a process there that both outlives it and has a hidden console.
+    private launch(app: AppConfig, request: object): Promise<number> {
+        if (!fs.existsSync(launcherPath)) {
+            return Promise.reject(new Error(`Error starting ${app.name}: pomitu has no launcher for ${process.platform}-${process.arch}, expected at ${launcherPath}`))
+        }
+        // npm packs files without their execute permission when it runs on Windows
+        if (process.platform !== 'win32' && (fs.statSync(launcherPath).mode & 0o111) === 0) {
+            try {
+                fs.chmodSync(launcherPath, 0o755)
+            } catch (error: unknown) {
+                return Promise.reject(new Error(`Error starting ${app.name}: the launcher isn't executable and pomitu can't change that (${(error as Error).message}). Run: chmod +x "${launcherPath}"`))
+            }
+        }
         return new Promise((resolve, reject) => {
             const launcher = nodeSpawn(launcherPath, [], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true })
             let output = ''

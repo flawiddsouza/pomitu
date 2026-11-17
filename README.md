@@ -83,6 +83,14 @@ pomitu flush [name]
 
 This command flushes the logs for all apps or a specific app if a name is provided.
 
+### Logs
+
+Each app's output goes to `~/.pomitu/logs/<name>-out.log` and `<name>-error.log`, where `<name>` is the app name in lowercase with spaces replaced by hyphens.
+
+Each line starts with the local time, such as `2026-11-18 00:26:19.952`. Both logs also get a timed line when the app starts, when pomitu stops it, and when it exits, with its exit code or the signal that ended it.
+
+Each running app has a `pomitu-runner` process beside it that writes these lines. Don't end it by hand. The app's output then has nowhere to go, and most apps crash on their next write. Use `pomitu stop` or `pomitu restart` instead.
+
 ## Configuration
 
 Pomitu uses a YAML configuration file to define the applications you want to manage. Here's an example structure:
@@ -108,11 +116,11 @@ On Windows, an app gets the environment variables stored in Windows for your acc
 If you want to contribute to Pomitu or run it in development mode:
 
 1. Clone the repository
-2. Install dependencies, plus [Go](https://go.dev/dl/) for building the Windows launcher:
+2. Install dependencies, plus [Go](https://go.dev/dl/) for building the launcher:
    ```sh
    npm install
    ```
-3. Build once, since starting apps on Windows needs `dist/launcher.exe`:
+3. Build once, since starting apps needs the launcher in `dist/launcher/`:
    ```sh
    npm run build
    ```
@@ -146,7 +154,7 @@ To build the project:
 npm run build
 ```
 
-This also builds `launcher/main.go` into `dist/launcher.exe`. On Windows, pomitu starts each app through it, because Node can't start a process that both outlives it and has a hidden console. The launcher starts the app and exits, so it doesn't stay running.
+This also builds the Go launcher in `launcher/` for each supported platform into `dist/launcher/<platform>-<arch>/`. The list of platforms is in `scripts/build-launcher.ts`. Pomitu starts each app through the launcher, which starts a small logger for the app. The logger starts the app, writes its log lines and exits after the app does. The pid pomitu records is the logger's. On Windows the launcher is also what lets an app outlive pomitu with a hidden console, which Node can't do.
 
 To build and run:
 ```sh
